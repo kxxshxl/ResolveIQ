@@ -38,6 +38,97 @@ but lower accuracy - retrain the artifact and re-run the gate) or serve the NLI 
 **Do not quantise it to int8**: dynamic int8 took blind severity/sentiment from 0.64 / 0.78 to 0.48 / 0.34.
 **Also:** recent `transformers` versions load this fp16 checkpoint in fp16 even on CPU (about 10x slower); the loader forces float32 on CPU.
 
+### Load testing (measured, reproducible)
+`POST /api/v1/resolve` was driven with Locust at 1, 5, 10 and 25 concurrent users, always against a throw-away database so the evaluation data and
+taxonomy are untouched. Run it with `python loadtest/run_loadtest.py --suite <name> --scenarios no_llm llm --levels 1 5 10 25 --duration 60`
+and `python loadtest/summarize.py <name>`; the full method, the raw per-request data and the generated tables are in
+[`loadtest/`](../loadtest/README.md) (`results/2026-10-06/SUMMARY.md`, `results/2026-10-06-after-fix/SUMMARY.md`).
+
+**Configuration.** Intel(R) Core(TM) i9-14900HX (24 cores / 32 threads), 31.7 GB RAM, NVIDIA GeForce RTX 4070 Laptop GPU shared by the LLM
+(Ollama `qwen3:4b-instruct`, 100% on GPU), the severity/sentiment NLI model and the embedding model. One API process (uvicorn, no replicas), default
+retrieval (`dense`), rate limiter and tracing off, Postgres and Redis in Docker. Closed-loop load, no think time (N users = N requests in flight), a fresh
+API process per run, one unique case reference per complaint so no cache can hit (except where stated). Mix: 275 in-domain complaints from the evaluation
+sets plus 5% out-of-domain, fixed seed. 60 s per run, 120 s for the real-LLM runs, and for the hung-LLM runs 180 s on the baseline code and 120 s after the fix. Latency columns are for
+HTTP-200 responses; errors and timeouts are counted separately. \* = under 100 completed requests, so the P99 is effectively the maximum.
+
+**Throughput and latency.**
+
+| scenario | users | OK req/s | P50 | P95 | P99 | errors | timeouts | answers: LLM / evidence-only / abstained % | notes |
+|---|---:|---:|---:|---:|---:|---:|---:|---|---|
+| evidence-only (no LLM) | 1 | 15.96 | 62 ms | 75 ms | 78 ms | 0% | 0% | 0 / 90 / 10 |  |
+| evidence-only (no LLM) | 5 | 17.61 | 283 ms | 312 ms | 354 ms | 0% | 0% | 0 / 90 / 10 |  |
+| evidence-only (no LLM) | 10 | 17.40 | 570 ms | 627 ms | 685 ms | 0% | 0% | 0 / 90 / 10 |  |
+| evidence-only (no LLM) | 25 | 17.39 | 1,426 ms | 1,533 ms | 1,592 ms | 0% | 0% | 0 / 89 / 11 |  |
+| evidence-only, affect model off | 1 | 33.17 | 29 ms | 40 ms | 42 ms | 0% | 0% | 0 / 91 / 9 | ablation |
+| evidence-only, affect model off | 10 | 39.98 | 245 ms | 341 ms | 388 ms | 0% | 0% | 0 / 90 / 10 | ablation |
+| evidence-only, affect model off | 25 | 38.73 | 641 ms | 837 ms | 914 ms | 0% | 0% | 0 / 90 / 10 | ablation |
+| cache hits (mock LLM, repeated complaints) | 10 | 370.47 | 19 ms | 23 ms | 511 ms | 0% | 0% | 92 / 0 / 8 | 98% cache hits |
+| cache hits (mock LLM, repeated complaints) | 25 | 292.71 | 54 ms | 70 ms | 1,386 ms | 0% | 0% | 92 / 0 / 8 | 98% cache hits |
+| full pipeline, real LLM (before fix) | 1 | 0.21 | 5,237 ms | 6,663 ms | 6,913 ms* | 0% | 0% | 84 / 0 / 16 |  |
+| full pipeline, real LLM (before fix) | 5 | 0.24 | 24.4 s | 28.2 s | 28.9 s* | 0% | 0% | 76 / 0 / 24 |  |
+| full pipeline, real LLM (before fix) | 10 | 0.19 | 26.4 s | 44.1 s | 44.6 s* | 23% | 23% | 70 / 0 / 30 |  |
+| full pipeline, real LLM (before fix) | 25 | 0.21 | 23.7 s | 45.2 s | 45.2 s* | 44% | 44% | 64 / 0 / 36 |  |
+
+**Main bottleneck: LLM generation, then the severity/sentiment model.**
+1. **The LLM caps the full pipeline at about 0.2 answers/s no matter how many users there are** (0.21, 0.24,
+   0.19 and 0.21 req/s at 1, 5, 10 and 25 users): the single local model behaves as a one-server queue, so latency grows linearly with users
+   (P50 5,237 ms at 1 user, 24.4 s at 5). At one user the `generate` stage is 4,520 of 4,572 ms
+   (99%); the GPU is 86-90% busy. Traces agree: `llm.call` takes 5.2 s with one user and
+   23.5 s with five (4.5x) while every other span moves by at most 1.7x
+   (`classify` is 1.6x slower too, consistent with the GPU being shared with the LLM).
+2. **Without the LLM the NLI affect model is the limit** (evidence-only mode, 17.4 req/s from 5 users up, though a single user already reaches 16.0). Its throughput equals 1 / the
+   one-user service time (56 ms), and the mean time of the `classify` stage grows from 36 to 535 ms at 10 users. In the traces
+   `classify.affect` goes from 33 to 584 ms (17.5x) and accounts for almost all of the extra latency, while every database
+   span stays within 1.2x of its unloaded time. Cause (code reading, not separately profiled): `AffectModel.cue_scores` holds a lock around each
+   forward pass and every request runs its own 14-hypothesis pass, so concurrent requests queue. **Ablation:** with `AFFECT_ENABLED=false` the same load reaches 40.0 req/s (2.3x).
+3. **After that, embedding and shared GPU/Python time** (about 40 req/s; with the affect model off the mean single-query embedding goes from
+   4.6 ms at 1 user to 87 ms at 10, and the API process uses 1.8 cores on average;
+   this second limit was not traced or profiled further).
+4. **Not bottlenecks:** Postgres (retrieval 1.9 ms), Redis, and the API layer: repeated complaints answered from the response cache
+   run at 370 req/s with a 19 ms P50 (cache hit ~7 ms). The load generator used at most 0.7 core.
+   Evidence-only answers are deliberately **not** cached (a cached degraded answer would outlive the LLM outage), so an outage pays the full pipeline cost per request.
+
+**Rough sizing (arithmetic on the measurements, with an assumed workload).** If an agent triggers one resolution every 30-60 s, one local GPU running both
+models serves about 6-13 agents with LLM answers, and the evidence-only path on the order of 500-1000. Production would use a dedicated LLM tier (or hosted model)
+and several API replicas; none of that was measured here.
+
+**When the LLM is unavailable or too slow** the evidence-only fallback must keep answering. Result: it does for a refused connection, but with the shipped defaults it
+**did not** for a hung or overloaded LLM, which the load test exposed as two defects (fixed in this change):
+
+| scenario | users | OK req/s | P50 | P95 | P99 | errors | timeouts | answers: LLM / evidence-only / abstained % | notes |
+|---|---:|---:|---:|---:|---:|---:|---:|---|---|
+| LLM down (connection refused) | 10 | 14.85 | 573 ms | 668 ms | 5,074 ms | 0% | 0% | 0 / 90 / 10 | before |
+| LLM down (connection refused) | 10 | 15.50 | 591 ms | 677 ms | 4,669 ms | 0% | 0% | 0 / 90 / 10 | after fix |
+| LLM down (connection refused) | 25 | 15.77 | 1,476 ms | 1,641 ms | 5,561 ms | 0% | 0% | 0 / 89 / 11 | after fix |
+| LLM hangs, defaults | 1 | 0.00 | - | - | - | 100% | 100% | 0 / 0 / 0 | before: every LLM-needing request is a 504 |
+| LLM hangs, defaults | 5 | 0.02 | 139 ms | 187 ms | 191 ms* | 71% | 71% | 0 / 0 / 100 | before: every LLM-needing request is a 504 |
+| LLM hangs, defaults | 10 | 0.04 | 385 ms | 781 ms | 818 ms* | 74% | 74% | 0 / 0 / 100 | before: every LLM-needing request is a 504 |
+| LLM hangs, `LLM_TIMEOUT_SECONDS=15` | 10 | 8.67 | 569 ms | 622 ms | 31.1 s | 0% | 0% | 0 / 90 / 10 | config-only workaround: breaker stampede |
+| LLM hangs, defaults | 1 | 3.90 | 62 ms | 76 ms | 80 ms | 0% | 0% | 0 / 88 / 12 | after fix |
+| LLM hangs, defaults | 5 | 13.02 | 230 ms | 300 ms | 320 ms | 0% | 0% | 0 / 90 / 10 | after fix |
+| LLM hangs, defaults | 10 | 13.02 | 561 ms | 626 ms | 681 ms | 0% | 0% | 0 / 90 / 10 | after fix |
+| LLM overloaded (real, 1 GPU) | 10 | 0.19 | 26.4 s | 44.1 s | 44.6 s* | 23% | 23% | 70 / 0 / 30 | before |
+| LLM overloaded (real, 1 GPU) | 10 | 3.29 | 570 ms | 30.1 s | 30.9 s | 0% | 0% | 2 / 85 / 12 | after fix |
+| LLM overloaded (real, 1 GPU) | 25 | 0.21 | 23.7 s | 45.2 s | 45.2 s* | 44% | 44% | 64 / 0 / 36 | before |
+| LLM overloaded (real, 1 GPU) | 25 | 7.02 | 1,698 ms | 30.4 s | 32.5 s | 0% | 0% | 1 / 88 / 11 | after fix |
+
+* **Timeouts were inconsistent.** One LLM attempt could wait 45 s, plus one retry, against a 60 s request timeout. A hung LLM therefore produced a 504 for every request that needed
+  the model (74% at 10 users; the rest were abstentions that never call it) and the circuit breaker never opened, because the cancelled request never reported its failure. Under real overload
+  (23% / 44% errors at 10 / 25 users) a fallback answer that takes ~100 ms was available but never returned. **Fix:** `LLM_TOTAL_BUDGET_SECONDS` (default 30 s) bounds all attempts of one
+  generation, each attempt gets only the remaining time, a timeout counts as a breaker failure, and startup refuses (production) a budget not below `REQUEST_TIMEOUT_SECONDS`.
+* **Half-open stampede.** After the cooldown every in-flight request probed the dead LLM at once (the `LLM_TIMEOUT_SECONDS=15` run: 8.7 req/s at 10 users, slower than 13.0 at 5, P99 31.1 s). **Fix:** half-open admits exactly one probe.
+* **After the fix** a hung LLM at 10 users gives 0% errors, 13.0 req/s and a 681 ms P99 (before: 74% errors, 0.04 req/s); only the requests in flight before the breaker opens wait out the 30 s
+  budget. For a refused connection the P99 stays at about 5 s because every request already in flight when the breaker opens pays two failed connects.
+* **Trade-off to be aware of:** under sustained overload the breaker sheds almost everything to evidence-only answers (85% at 10 users, 88% at 25), i.e. a single local LLM
+  can only back a handful of concurrent agents. Instant cited answers beat 60 s failures, but the real remedy is capacity.
+* For several providers set `LLM_TIMEOUT_SECONDS` to at most the budget divided by the number of providers, otherwise a hung first provider uses the whole budget.
+
+**Next steps (not implemented, expected but unmeasured benefit).** Cap concurrent LLM calls per replica (a bulkhead) so overflow degrades at once; micro-batch the NLI model across requests or move it to a
+shared service; add API replicas behind the proxy (the Kubernetes manifests and `docker-compose.prod.yml` already run two); give the LLM its own GPU. Re-run the suite after each change.
+
+**Caveats.** One laptop, one API process, 25 users at most, closed loop, and runs of 60-120 s; the baseline real-LLM rows have only 25-45 requests each, so their percentiles are coarse. Tracing was off for the headline runs
+and costs about 7-9% of throughput in this pipeline (14.9 vs 16.0 req/s at 1 user, 15.8 vs 17.4 at 10).
+
 ## 2. Security
 
 | Concern | Implemented now | Production recommendation |

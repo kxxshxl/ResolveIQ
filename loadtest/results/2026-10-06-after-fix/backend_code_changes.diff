@@ -1,0 +1,155 @@
+diff --git a/backend/app/core/config.py b/backend/app/core/config.py
+index 7306685..71f2666 100644
+--- a/backend/app/core/config.py
++++ b/backend/app/core/config.py
+@@ -81,7 +81,9 @@ class Settings(BaseSettings):
+     openai_compat_base_url: str = ""
+     openai_compat_api_key: str = ""
+     openai_compat_model: str = ""
+-    llm_timeout_seconds: float = 45.0
++    llm_timeout_seconds: float = 45.0       # one attempt
++    llm_total_budget_seconds: float = 30.0  # all attempts and providers for one generation; MUST stay below request_timeout_seconds,
++                                            # otherwise a hung LLM turns every request into a 504 instead of the evidence-only fallback
+     llm_max_retries: int = 1
+     llm_max_tokens: int = 700
+     llm_circuit_failure_threshold: int = 3
+@@ -138,6 +140,8 @@ class Settings(BaseSettings):
+             problems.append("RATE_LIMIT_PER_MINUTE must be > 0")
+         if self.allow_mutating_eval:
+             problems.append("ALLOW_MUTATING_EVAL must be false")
++        if self.llm_total_budget_seconds >= self.request_timeout_seconds:
++            problems.append("LLM_TOTAL_BUDGET_SECONDS must be below REQUEST_TIMEOUT_SECONDS, or the evidence-only fallback can never answer")
+         return problems
+ 
+     @property
+diff --git a/backend/app/services/llm/base.py b/backend/app/services/llm/base.py
+index 5097520..31c806b 100644
+--- a/backend/app/services/llm/base.py
++++ b/backend/app/services/llm/base.py
+@@ -35,6 +35,9 @@ class LLMProvider(Protocol):
+     async def healthy(self) -> bool: ...
+ 
+ 
++MIN_ATTEMPT_SECONDS = 1.0  # an attempt with less time than this left in the budget is not worth starting
++
++
+ class CircuitBreaker:
+     """Opens after N consecutive failures; half-opens after a cooldown (one trial call)."""
+ 
+@@ -42,6 +45,7 @@ class CircuitBreaker:
+         self.threshold, self.cooldown_s, self.name = threshold, cooldown_s, name
+         self.failures = 0
+         self.opened_at: float | None = None
++        self._probing = False
+ 
+     @property
+     def is_open(self) -> bool:
+@@ -51,12 +55,27 @@ class CircuitBreaker:
+             return False  # half-open: allow a trial
+         return True
+ 
++    def allow(self) -> bool:
++        """May a call go through? Closed: yes. Open: no. Half-open (cooldown elapsed): exactly ONE caller probes and the rest are refused
++        until it reports, so a recovering or still-dead provider is not hit by every in-flight request at once."""
++        if self.opened_at is None:
++            return True
++        if time.monotonic() - self.opened_at < self.cooldown_s or self._probing:
++            return False
++        self._probing = True
++        return True
++
++    def release(self) -> None:
++        """Give up the half-open probe slot (idempotent), e.g. when the probing request was cancelled before it could report."""
++        self._probing = False
++
+     def record_success(self) -> None:
+-        self.failures, self.opened_at = 0, None
++        self.failures, self.opened_at, self._probing = 0, None, False
+         LLM_CIRCUIT_OPEN.labels(self.name).set(0)
+ 
+     def record_failure(self) -> None:
+         self.failures += 1
++        self._probing = False
+         if self.failures >= self.threshold:
+             self.opened_at = time.monotonic()
+             LLM_CIRCUIT_OPEN.labels(self.name).set(1)
+@@ -89,36 +108,54 @@ class ResilientLLM:
+     async def generate(self, system: str, user: str, *, json_mode: bool = True, max_tokens: int | None = None,
+                        temperature: float = 0.1) -> LLMResult:
+         errors: list[str] = []
++        deadline = time.monotonic() + self.s.llm_total_budget_seconds  # one budget for every attempt of every provider
+         for p in self.providers:
+             br = self.breakers[p.name]
+-            if br.is_open:
++            if not br.allow():
+                 errors.append(f"{p.name}: circuit open")
+                 tracing.event("llm.circuit_open", gen_ai__system=p.name)
+                 continue
+-            for attempt in range(self.s.llm_max_retries + 1):
+-                t0 = time.perf_counter()
+-                try:
+-                    with tracing.span("llm.call", {"gen_ai.system": p.name, "gen_ai.request.model": p.model, "resolveiq.llm.attempt": attempt}) as sp:
+-                        res = await p.generate(system, user, json_mode=json_mode, max_tokens=max_tokens or self.s.llm_max_tokens,
+-                                               temperature=temperature, timeout=self.s.llm_timeout_seconds)
+-                        if sp.is_recording():
+-                            sp.set_attributes(tracing._clean({"gen_ai.usage.input_tokens": res.prompt_tokens,
+-                                                              "gen_ai.usage.output_tokens": res.completion_tokens}))
+-                    LLM_LATENCY.labels(p.name).observe(time.perf_counter() - t0)
+-                    if res.prompt_tokens:
+-                        LLM_TOKENS.labels(p.name, "prompt").inc(res.prompt_tokens)
+-                    if res.completion_tokens:
+-                        LLM_TOKENS.labels(p.name, "completion").inc(res.completion_tokens)
+-                    br.record_success()
+-                    return res
+-                except Exception as exc:  # noqa: BLE001
+-                    reason = "timeout" if isinstance(exc, (asyncio.TimeoutError, TimeoutError)) or "Timeout" in type(exc).__name__ else "error"
+-                    LLM_FAILURES.labels(p.name, reason).inc()
+-                    errors.append(f"{p.name}[{attempt}]: {type(exc).__name__}: {exc}")
+-                    log.warning("llm call failed", extra={"provider": p.name, "attempt": attempt, "reason": reason, "error": str(exc)[:200]})
+-                    if attempt < self.s.llm_max_retries:
+-                        await asyncio.sleep(0.5 * (2 ** attempt))
+-            br.record_failure()
++            tried = False
++            try:
++                for attempt in range(self.s.llm_max_retries + 1):
++                    remaining = deadline - time.monotonic()
++                    if remaining < MIN_ATTEMPT_SECONDS:
++                        errors.append(f"{p.name}: time budget of {self.s.llm_total_budget_seconds:.0f}s used up")
++                        break
++                    tried = True
++                    t0 = time.perf_counter()
++                    try:
++                        with tracing.span("llm.call", {"gen_ai.system": p.name, "gen_ai.request.model": p.model, "resolveiq.llm.attempt": attempt}) as sp:
++                            res = await p.generate(system, user, json_mode=json_mode, max_tokens=max_tokens or self.s.llm_max_tokens,
++                                                   temperature=temperature, timeout=min(self.s.llm_timeout_seconds, remaining))
++                            if sp.is_recording():
++                                sp.set_attributes(tracing._clean({"gen_ai.usage.input_tokens": res.prompt_tokens,
++                                                                  "gen_ai.usage.output_tokens": res.completion_tokens}))
++                        LLM_LATENCY.labels(p.name).observe(time.perf_counter() - t0)
++                        if res.prompt_tokens:
++                            LLM_TOKENS.labels(p.name, "prompt").inc(res.prompt_tokens)
++                        if res.completion_tokens:
++                            LLM_TOKENS.labels(p.name, "completion").inc(res.completion_tokens)
++                        br.record_success()
++                        return res
++                    except Exception as exc:  # noqa: BLE001
++                        reason = "timeout" if isinstance(exc, (asyncio.TimeoutError, TimeoutError)) or "Timeout" in type(exc).__name__ else "error"
++                        LLM_FAILURES.labels(p.name, reason).inc()
++                        errors.append(f"{p.name}[{attempt}]: {type(exc).__name__}: {exc}")
++                        log.warning("llm call failed", extra={"provider": p.name, "attempt": attempt, "reason": reason, "error": str(exc)[:200]})
++                        backoff = 0.5 * (2 ** attempt)
++                        if attempt < self.s.llm_max_retries:
++                            if deadline - time.monotonic() > backoff + MIN_ATTEMPT_SECONDS:
++                                await asyncio.sleep(backoff)
++                            else:
++                                errors.append(f"{p.name}: no time left to retry")
++                                break
++                if tried:
++                    br.record_failure()
++            finally:
++                br.release()  # a half-open probe that was cancelled mid-flight must not wedge the breaker open
++            if deadline - time.monotonic() < MIN_ATTEMPT_SECONDS:
++                break
+         raise LLMUnavailable("all LLM providers failed: " + "; ".join(errors[-4:]))
+ 
+     async def health(self) -> dict[str, bool]:

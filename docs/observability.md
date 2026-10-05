@@ -131,8 +131,8 @@ string in a complaint and searching every attribute and event of every span for 
 ## Overhead
 
 With tracing off (the default) the SDK is not imported, `span()` returns a null context and `@traced` calls the function directly (its attribute
-extractors are not even evaluated). With tracing on, each request creates about 30 to 40 spans; the cost has not been benchmarked here, so
-use `OTEL_SAMPLE_RATIO` if you need to bound it. Spans are exported in batches off the request path (OTLP) and flushed at shutdown.
+extractors are not even evaluated). With tracing on, each request creates about 30 to 40 spans. Measured with the load test (evidence-only pipeline, 100% sampling, Jaeger on the same machine):
+14.9 vs 16.0 req/s at 1 user (-7%) and 15.8 vs 17.4 req/s at 10 users (-9%); see [`production.md`](production.md#load-testing-measured-reproducible). Use `OTEL_SAMPLE_RATIO` to bound it. Spans are exported in batches off the request path (OTLP) and flushed at shutdown.
 
 ## Tests
 

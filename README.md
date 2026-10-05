@@ -175,6 +175,8 @@ python -m app.evaluation.tuning              # hyper-parameter selection on the 
 python -m app.evaluation.run --suites classification retrieval robustness evolving discovery   # ~4 min on a GPU, no LLM needed
 python -m app.evaluation.run --suites rag e2e --judge 20 --alt-openai-model qwen3:4b-instruct  # needs Ollama; ~10 min
 python -m app.evaluation.gate                # CI quality gate: exit 1 if any metric fell below data/eval/thresholds.json
+# load test (Locust; throw-away database; see loadtest/README.md and docs/production.md):
+python loadtest/run_loadtest.py --suite mytest --scenarios no_llm llm --levels 1 5 10 25 --duration 60 && python loadtest/summarize.py mytest
 python scripts/embedding_experiment.py       # embedding-model comparison (no DB)
 ```
 Writes `data/eval/results/latest.json` and `docs/evaluation_results.md`. `data/eval/results/baseline_v1.json` is the run recorded
@@ -235,7 +237,7 @@ Implemented now vs recommended (pooling, HNSW tuning, batching, queues, caching,
 horizontal scaling, DB scaling, embedding migration, observability, probes) in [`docs/production.md`](docs/production.md).
 Implemented: async pooled Postgres, HNSW + GIN, batch embedding, incremental ingestion, **separate worker service on a Postgres
 queue (SKIP LOCKED, heartbeat, retry/backoff, stale-job recovery, scheduled discovery)**, Redis cache + shared rate limit,
-request/LLM/DB timeouts, retries + circuit breaker + provider chain + evidence-only fallback, stateless API, classification
+request/LLM/DB timeouts, retries + circuit breaker (single half-open probe) + one total LLM time budget + provider chain + evidence-only fallback, **a reproducible load test (`loadtest/`)**, stateless API, classification
 overlapped with retrieval, Prometheus metrics for both services + 9 validated alert rules + provisioned Grafana dashboard,
 **label-free drift monitoring**, **CI quality gate on evaluation metrics**, JSON logs with trace id, **opt-in OpenTelemetry tracing (OTLP)**, liveness/readiness, non-root containers.
 
@@ -264,9 +266,9 @@ Auth is off only in the dev stack (empty `API_KEYS`, logged as a warning); with 
 Real ticket data and several labellers for severity/sentiment (inter-annotator agreement); fine-tune or distil the NLI affect model
 so it runs at MiniLM cost on CPU; fine-tuned bi-encoder or a similarity-trained reranker; feedback → automatic promotion/review queue
 per-tenant isolation;
-OIDC + TLS; OpenTelemetry metrics and browser-side tracing (server-side tracing is done); KEDA autoscaling of workers on queue depth; load tests and applying the Kubernetes manifests to a live cluster.
+OIDC + TLS; OpenTelemetry metrics and browser-side tracing (server-side tracing is done); KEDA autoscaling of workers on queue depth; applying the Kubernetes manifests to a live cluster; load tests of more than one API replica and of a dedicated LLM tier (a single-instance load test is done, see section 15).
 
 ## Repository layout
 `backend/app` (api, classification, retrieval, rag, ingestion, evaluation, services, db, core, observability) · `backend/tests` ·
 `backend/scripts` (dataset generation, seed, tuning helpers, dev server) · `frontend` · `data/{raw,processed,eval}` · `docs/` ·
-`infra/` (Postgres role init, Prometheus, Grafana) · `deploy/` (secrets, smoke test, backup, Caddyfile) · `k8s/` · `.github/workflows/ci.yml` · `docker-compose.yml` (dev) · `docker-compose.prod.yml` · `.env.example` · `.env.prod.example`.
+`loadtest/` (Locust load test, harness, raw results) · `infra/` (Postgres role init, Prometheus, Grafana) · `deploy/` (secrets, smoke test, backup, Caddyfile) · `k8s/` · `.github/workflows/ci.yml` · `docker-compose.yml` (dev) · `docker-compose.prod.yml` · `.env.example` · `.env.prod.example`.

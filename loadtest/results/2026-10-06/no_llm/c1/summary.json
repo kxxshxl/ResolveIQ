@@ -1,0 +1,222 @@
+{
+  "meta": {
+    "scenario": "no_llm",
+    "description": "evidence-only mode: no LLM provider, everything except generation",
+    "users": 1,
+    "duration_s": 60,
+    "api_startup_s": 21.1,
+    "overrides": {
+      "LLM_PROVIDERS": ""
+    },
+    "tracing": false
+  },
+  "users": 1,
+  "cache_mode": "cold",
+  "ood_share": 0.05,
+  "seed": 42,
+  "client_timeout_s": 90.0,
+  "pool": {
+    "in_domain": 275,
+    "out_of_domain": 12
+  },
+  "wall_seconds": 59.7,
+  "requests": {
+    "completed": 952,
+    "ok": 952,
+    "failed": 0,
+    "by_kind": {
+      "ok": 952
+    },
+    "error_rate": 0.0,
+    "timeout_rate": 0.0
+  },
+  "throughput": {
+    "completed_per_s": 15.959,
+    "ok_per_s": 15.959
+  },
+  "outcome": {
+    "degraded": 858,
+    "abstained": 94
+  },
+  "generator": {
+    "extractive": 858,
+    "none": 94
+  },
+  "cache_hits": 1,
+  "latency_ms_ok": {
+    "n": 952,
+    "mean": 62.5,
+    "p50": 62.0,
+    "p90": 73.5,
+    "p95": 75.1,
+    "p99": 78.0,
+    "max": 89.1
+  },
+  "latency_ms_all": {
+    "n": 952,
+    "mean": 62.5,
+    "p50": 62.0,
+    "p90": 73.5,
+    "p95": 75.1,
+    "p99": 78.0,
+    "max": 89.1
+  },
+  "server_stage_ms_ok": {
+    "preprocess": {
+      "n": 951,
+      "mean": 0.1,
+      "p50": 0.1,
+      "p90": 0.1,
+      "p95": 0.1,
+      "p99": 0.1,
+      "max": 0.1
+    },
+    "embed": {
+      "n": 951,
+      "mean": 7.2,
+      "p50": 7.1,
+      "p90": 8.1,
+      "p95": 8.6,
+      "p99": 10.1,
+      "max": 13.4
+    },
+    "classify": {
+      "n": 951,
+      "mean": 36.3,
+      "p50": 36.4,
+      "p90": 41.1,
+      "p95": 42.1,
+      "p99": 44.2,
+      "max": 48.3
+    },
+    "retrieve": {
+      "n": 951,
+      "mean": 3.3,
+      "p50": 3.3,
+      "p90": 3.8,
+      "p95": 4.0,
+      "p99": 4.7,
+      "max": 6.2
+    },
+    "generate": {
+      "n": 951,
+      "mean": 12.9,
+      "p50": 11.8,
+      "p90": 20.1,
+      "p95": 21.2,
+      "p99": 22.6,
+      "max": 26.5
+    },
+    "total": {
+      "n": 952,
+      "mean": 56.5,
+      "p50": 56.5,
+      "p90": 66.9,
+      "p95": 68.7,
+      "p99": 71.5,
+      "max": 81.3
+    }
+  },
+  "notes": [
+    "Percentiles are numpy linear-interpolated over the individual requests; P99 is not meaningful below ~100 requests.",
+    "Requests still in flight when the run ends are not counted."
+  ],
+  "server_metrics": {
+    "stage": {
+      "preprocess": {
+        "count": 952,
+        "mean_ms": 0.1
+      },
+      "embed": {
+        "count": 951,
+        "mean_ms": 7.2
+      },
+      "classify": {
+        "count": 951,
+        "mean_ms": 36.3
+      },
+      "retrieve": {
+        "count": 951,
+        "mean_ms": 3.3
+      },
+      "generate": {
+        "count": 951,
+        "mean_ms": 12.9
+      }
+    },
+    "http_resolve": {
+      "/api/v1/resolve": {
+        "count": 952,
+        "mean_ms": 61.3
+      }
+    },
+    "affect_model": {
+      "all": {
+        "count": 951,
+        "mean_ms": 34.7
+      }
+    },
+    "embedding": {
+      "single": {
+        "count": 949,
+        "mean_ms": 4.5
+      },
+      "batch": {
+        "count": 858,
+        "mean_ms": 12.1
+      }
+    },
+    "retrieval": {
+      "ticket": {
+        "count": 951,
+        "mean_ms": 1.7
+      },
+      "article": {
+        "count": 951,
+        "mean_ms": 1.6
+      }
+    },
+    "rerank": {},
+    "llm_call": {},
+    "resolutions": {
+      "generator=extractive,status=degraded": 858,
+      "generator=none,status=abstained": 93
+    },
+    "llm_failures": {},
+    "cache": {
+      "cache=resolve,result=miss": 951,
+      "cache=resolve,result=hit": 1
+    },
+    "abstentions": {
+      "reason=weak_evidence": 93
+    },
+    "rate_limited": {},
+    "llm_circuit_open_at_end": {}
+  },
+  "resources": {
+    "api_cpu_cores": {
+      "mean": 1.01,
+      "max": 1.35
+    },
+    "api_rss_mb": {
+      "mean": 1807.29,
+      "max": 1812
+    },
+    "locust_cpu_cores": {
+      "mean": 0.03,
+      "max": 0.65
+    },
+    "system_cpu_pct": {
+      "mean": 10.85,
+      "max": 18.0
+    },
+    "gpu_util_pct": {
+      "mean": 60.77,
+      "max": 66.0
+    },
+    "gpu_mem_mb": {
+      "mean": 4927.07,
+      "max": 4939.0
+    }
+  }
+}

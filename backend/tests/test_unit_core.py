@@ -168,6 +168,98 @@ def test_circuit_breaker_half_opens_after_cooldown():
     assert cb.is_open is False  # cooldown 0 => immediately half-open (one trial allowed)
 
 
+# ---------------------------------------------------------------- LLM time budget and half-open probing (found by the load test)
+class _Hang:
+    """A provider that honours the per-attempt timeout it is given but otherwise never answers (a wedged model)."""
+
+    name, model = "hang", "m"
+
+    def __init__(self):
+        self.timeouts = []
+
+    async def generate(self, system, user, *, timeout, **kw):
+        self.timeouts.append(timeout)
+        await asyncio.wait_for(asyncio.sleep(3600), timeout)
+
+    async def healthy(self):
+        return False
+
+
+def test_llm_total_budget_bounds_a_hanging_provider_and_still_trips_the_breaker():
+    import time
+
+    hang = _Hang()
+    llm = ResilientLLM([hang], Settings(llm_total_budget_seconds=2.0, llm_timeout_seconds=45.0, llm_max_retries=1,
+                                        llm_circuit_failure_threshold=1, llm_circuit_cooldown_seconds=60))
+    t0 = time.monotonic()
+    with pytest.raises(LLMUnavailable):
+        asyncio.run(llm.generate("s", "u"))
+    assert time.monotonic() - t0 < 4, "the whole chain, retries included, must finish inside the budget (here 2 s), not 2 x 45 s"
+    assert hang.timeouts and max(hang.timeouts) <= 2.0, "an attempt is never given more time than the budget has left"
+    assert llm.breakers["hang"].is_open, "timing out counts as a failure for the circuit breaker, so later requests fail fast"
+
+
+def test_llm_budget_is_shared_across_providers():
+    import time
+
+    a, b = _Hang(), _Flaky("b")
+    a.name = "a"
+    # per-attempt timeout (1 s) below the budget (5 s): the hung first provider cannot eat everything, so the fallback provider still answers
+    llm = ResilientLLM([a, b], Settings(llm_timeout_seconds=1.0, llm_total_budget_seconds=5.0, llm_max_retries=0, llm_circuit_failure_threshold=5))
+    t0 = time.monotonic()
+    res = asyncio.run(llm.generate("s", "u"))
+    assert res.provider == "b" and time.monotonic() - t0 < 3
+    assert max(a.timeouts) <= 1.0
+
+    # but a single attempt timeout longer than the budget is capped to what the budget has left, so the chain still ends in time
+    c = _Hang()
+    with pytest.raises(LLMUnavailable):
+        asyncio.run(ResilientLLM([c], Settings(llm_timeout_seconds=45.0, llm_total_budget_seconds=1.5, llm_max_retries=0)).generate("s", "u"))
+    assert max(c.timeouts) <= 1.5
+
+
+def test_circuit_breaker_half_open_admits_exactly_one_probe():
+    cb = CircuitBreaker(1, 0.0, "t")
+    assert cb.allow() is True            # closed
+    cb.record_failure()                  # opens; cooldown 0 so it is half-open straight away
+    assert cb.allow() is True            # the probe
+    assert cb.allow() is False and cb.allow() is False  # everyone else is refused while it is in flight
+    cb.record_failure()                  # the probe failed: re-opened, one new probe may go
+    assert cb.allow() is True and cb.allow() is False
+    cb.record_success()                  # the probe succeeded: closed for everyone
+    assert cb.allow() is True and cb.allow() is True
+
+
+def test_cancelled_probe_does_not_wedge_the_breaker_open():
+    cb = CircuitBreaker(1, 0.0, "t")
+    cb.record_failure()
+    assert cb.allow() is True and cb.allow() is False
+    cb.release()                         # the probing request was cancelled before reporting
+    assert cb.allow() is True
+
+
+def test_hung_llm_with_many_concurrent_requests_probes_once():
+    hang = _Hang()
+    llm = ResilientLLM([hang], Settings(llm_total_budget_seconds=1.2, llm_max_retries=0, llm_circuit_failure_threshold=1,
+                                        llm_circuit_cooldown_seconds=0.0))
+
+    llm.breakers["hang"].record_failure()  # open (threshold 1); the zero cooldown makes it half-open at once
+
+    async def scenario():
+        await asyncio.gather(*[llm.generate("s", "u") for _ in range(8)], return_exceptions=True)
+
+    asyncio.run(scenario())
+    assert len(hang.timeouts) == 1, f"8 simultaneous requests must produce one probe, not {len(hang.timeouts)}"
+
+
+def test_settings_reject_an_llm_budget_that_the_request_timeout_would_cut_off():
+    bad = Settings(llm_total_budget_seconds=90, request_timeout_seconds=60, api_keys="k" * 30, cors_origins="https://a.example",
+                   database_url="postgresql://u:pw@h/d", database_admin_url="postgresql://o:pw2@h/d", redis_url="redis://r:6379/0")
+    assert any("LLM_TOTAL_BUDGET_SECONDS" in p for p in bad.production_problems())
+    assert not any("LLM_TOTAL_BUDGET_SECONDS" in p for p in bad.model_copy(update={"llm_total_budget_seconds": 30}).production_problems())
+    assert Settings().llm_total_budget_seconds < Settings().request_timeout_seconds  # the shipped defaults are consistent
+
+
 # ---------------------------------------------------------------- classifier LLM fallback (refine)
 def _refine_setup(llm_text, fail=False):
     from types import SimpleNamespace

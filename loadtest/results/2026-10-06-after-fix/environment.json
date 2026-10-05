@@ -1,0 +1,37 @@
+{
+  "date": "2026-10-06 02:16:34",
+  "platform": "Windows-10-10.0.26200-SP0",
+  "python": "3.11.9",
+  "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
+  "cpu_cores_physical": 24,
+  "cpu_threads": 32,
+  "ram_gb": 31.7,
+  "git_commit": "54dc530",
+  "git_dirty": true,
+  "gpu": "NVIDIA GeForce RTX 4070 Laptop GPU, 8188 MiB, 576.28",
+  "api": "1 uvicorn process (scripts/dev_server.py), no replicas, rate limiter off, tracing off (unless a run says otherwise)",
+  "models": {
+    "embedding": "sentence-transformers/all-MiniLM-L6-v2",
+    "reranker": "cross-encoder/ms-marco-MiniLM-L-6-v2",
+    "affect": "MoritzLaurer/deberta-v3-large-zeroshot-v2.0",
+    "default_retrieval_strategy": "dense",
+    "llm": "ollama:qwen3:4b-instruct at http://localhost:11434"
+  },
+  "llm_settings": {
+    "timeout_s": 45.0,
+    "retries": 1,
+    "circuit_threshold": 3,
+    "circuit_cooldown_s": 30.0,
+    "request_timeout_s": 60.0
+  },
+  "ollama_ps": "NAME    ID    SIZE    PROCESSOR    CONTEXT    UNTIL",
+  "versions": {
+    "locust": "2.46.7",
+    "torch": "2.8.0+cu126",
+    "sentence-transformers": "6.1.0",
+    "fastapi": "0.141.1",
+    "uvicorn": "0.54.0",
+    "psycopg": "3.3.6"
+  },
+  "cpu_name": "Intel(R) Core(TM) i9-14900HX"
+}

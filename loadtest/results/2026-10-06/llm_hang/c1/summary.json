@@ -1,0 +1,162 @@
+{
+  "meta": {
+    "scenario": "llm_hang",
+    "description": "LLM accepts the connection and never answers, production defaults (45 s timeout, 1 retry)",
+    "users": 1,
+    "duration_s": 180,
+    "api_startup_s": 44.8,
+    "overrides": {
+      "OLLAMA_BASE_URL": "http://127.0.0.1:11999"
+    },
+    "tracing": false
+  },
+  "users": 1,
+  "cache_mode": "cold",
+  "ood_share": 0.05,
+  "seed": 42,
+  "client_timeout_s": 90.0,
+  "pool": {
+    "in_domain": 275,
+    "out_of_domain": 12
+  },
+  "wall_seconds": 179.7,
+  "requests": {
+    "completed": 2,
+    "ok": 0,
+    "failed": 2,
+    "by_kind": {
+      "server_timeout": 2
+    },
+    "error_rate": 1.0,
+    "timeout_rate": 1.0
+  },
+  "throughput": {
+    "completed_per_s": 0.011,
+    "ok_per_s": 0.0
+  },
+  "outcome": {},
+  "generator": {},
+  "cache_hits": 0,
+  "latency_ms_ok": {
+    "n": 0
+  },
+  "latency_ms_all": {
+    "n": 2,
+    "mean": 60018.9,
+    "p50": 60018.9,
+    "p90": 60021.7,
+    "p95": 60022.1,
+    "p99": 60022.3,
+    "max": 60022.4
+  },
+  "server_stage_ms_ok": {
+    "preprocess": {
+      "n": 0
+    },
+    "embed": {
+      "n": 0
+    },
+    "classify": {
+      "n": 0
+    },
+    "retrieve": {
+      "n": 0
+    },
+    "generate": {
+      "n": 0
+    },
+    "total": {
+      "n": 0
+    }
+  },
+  "notes": [
+    "Percentiles are numpy linear-interpolated over the individual requests; P99 is not meaningful below ~100 requests.",
+    "Requests still in flight when the run ends are not counted."
+  ],
+  "server_metrics": {
+    "stage": {
+      "preprocess": {
+        "count": 3,
+        "mean_ms": 0.1
+      },
+      "embed": {
+        "count": 3,
+        "mean_ms": 14.6
+      },
+      "classify": {
+        "count": 3,
+        "mean_ms": 87.0
+      },
+      "retrieve": {
+        "count": 3,
+        "mean_ms": 5.9
+      }
+    },
+    "http_resolve": {
+      "/api/v1/resolve": {
+        "count": 2,
+        "mean_ms": 60013.1
+      }
+    },
+    "affect_model": {
+      "all": {
+        "count": 3,
+        "mean_ms": 83.5
+      }
+    },
+    "embedding": {
+      "single": {
+        "count": 3,
+        "mean_ms": 8.2
+      }
+    },
+    "retrieval": {
+      "ticket": {
+        "count": 3,
+        "mean_ms": 4.2
+      },
+      "article": {
+        "count": 3,
+        "mean_ms": 1.7
+      }
+    },
+    "rerank": {},
+    "llm_call": {},
+    "resolutions": {},
+    "llm_failures": {
+      "provider=ollama,reason=timeout": 3
+    },
+    "cache": {
+      "cache=resolve,result=miss": 3
+    },
+    "abstentions": {},
+    "rate_limited": {},
+    "llm_circuit_open_at_end": {}
+  },
+  "resources": {
+    "api_cpu_cores": {
+      "mean": 0.01,
+      "max": 0.15
+    },
+    "api_rss_mb": {
+      "mean": 1778.65,
+      "max": 1781
+    },
+    "locust_cpu_cores": {
+      "mean": 0.0,
+      "max": 0.54
+    },
+    "system_cpu_pct": {
+      "mean": 6.85,
+      "max": 11.8
+    },
+    "gpu_util_pct": {
+      "mean": 1.31,
+      "max": 3.0
+    },
+    "gpu_mem_mb": {
+      "mean": 4842.17,
+      "max": 4853.0
+    }
+  }
+}

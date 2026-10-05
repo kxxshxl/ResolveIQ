@@ -81,7 +81,9 @@ class Settings(BaseSettings):
     openai_compat_base_url: str = ""
     openai_compat_api_key: str = ""
     openai_compat_model: str = ""
-    llm_timeout_seconds: float = 45.0
+    llm_timeout_seconds: float = 45.0       # one attempt
+    llm_total_budget_seconds: float = 30.0  # all attempts and providers for one generation; MUST stay below request_timeout_seconds,
+                                            # otherwise a hung LLM turns every request into a 504 instead of the evidence-only fallback
     llm_max_retries: int = 1
     llm_max_tokens: int = 700
     llm_circuit_failure_threshold: int = 3
@@ -138,6 +140,8 @@ class Settings(BaseSettings):
             problems.append("RATE_LIMIT_PER_MINUTE must be > 0")
         if self.allow_mutating_eval:
             problems.append("ALLOW_MUTATING_EVAL must be false")
+        if self.llm_total_budget_seconds >= self.request_timeout_seconds:
+            problems.append("LLM_TOTAL_BUDGET_SECONDS must be below REQUEST_TIMEOUT_SECONDS, or the evidence-only fallback can never answer")
         return problems
 
     @property

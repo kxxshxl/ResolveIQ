@@ -94,7 +94,8 @@ class DiscoveryService:
                                           team or prop["team"])
             action = {"action": "created", "label_id": new_id}
         await self.taxonomy.refresh()
-        await self.repo.decide_proposal(proposal_id, "accepted", note)
+        outcome = f"{action['action']} intent {action['label_id']}"  # audit trail: what accepting actually did
+        await self.repo.decide_proposal(proposal_id, "accepted", f"{outcome} - {note}" if note else outcome)
         await self.repo.bump_corpus_version()  # classification changed -> invalidate cached responses
         return {**action, "taxonomy_version": self.taxonomy.current.version, "members": len(prop["member_request_ids"])}
 

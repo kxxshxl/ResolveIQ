@@ -128,6 +128,8 @@ def test_discovery_finds_two_novel_classes_and_review_flow_works(client, svc, ru
     assert client.get("/api/v1/taxonomy").json()["version"] > v0
     assert svc.taxonomy.current.has("intent", "zz_emerging_a")
     assert client.post(f"/api/v1/taxonomy/proposals/{chosen['proposal_id']}/accept", json={}).status_code == 409
+    decided = next(p for p in client.get("/api/v1/taxonomy/proposals?status=accepted").json()["items"] if p["proposal_id"] == chosen["proposal_id"])
+    assert decided["decided_note"] == "created intent zz_emerging_a"  # the audit trail records what accepting did
 
     other = top[1]
     assert client.post(f"/api/v1/taxonomy/proposals/{other['proposal_id']}/reject", json={"note": "duplicate of existing process"}).status_code == 200

@@ -1,0 +1,16 @@
+model                                                split  tHit@1   tMRR  tnDCG10  aHit@1   aMRR  enc_ms/q
+sentence-transformers/all-MiniLM-L6-v2               val      0.72 0.8165   0.4458    0.72  0.824  0.3
+sentence-transformers/all-MiniLM-L6-v2               test     0.65 0.7709   0.4885    0.74 0.8286  0.3
+sentence-transformers/all-MiniLM-L6-v2               gold      1.0    1.0    0.669  0.8462 0.8955  0.3
+BAAI/bge-small-en-v1.5                               val       0.6 0.7525   0.4669    0.78 0.8579  0.4
+BAAI/bge-small-en-v1.5                               test     0.74 0.8125   0.5156    0.64 0.7715  0.4
+BAAI/bge-small-en-v1.5                               gold   0.9615 0.9808   0.7121  0.8077 0.8859  0.4
+thenlper/gte-small                                   val      0.66 0.7865   0.4745     0.8  0.858  0.2
+thenlper/gte-small                                   test     0.69 0.7984   0.5057    0.69 0.8142  0.3
+thenlper/gte-small                                   gold   0.9615 0.9808   0.7106  0.9231 0.9551  0.3
+sentence-transformers/paraphrase-MiniLM-L6-v2        val      0.52 0.6955   0.3707    0.48 0.6305  0.3
+sentence-transformers/paraphrase-MiniLM-L6-v2        test     0.46 0.6352    0.384    0.57  0.702  0.3
+sentence-transformers/paraphrase-MiniLM-L6-v2        gold   0.9615 0.9808   0.6383  0.8077 0.8814  0.3
+sentence-transformers/multi-qa-MiniLM-L6-cos-v1      val      0.64 0.7722   0.4454    0.64  0.777  0.3
+sentence-transformers/multi-qa-MiniLM-L6-cos-v1      test     0.58 0.7151   0.4656    0.66 0.7758  0.3
+sentence-transformers/multi-qa-MiniLM-L6-cos-v1      gold   0.9615 0.9808   0.6591  0.8846  0.919  0.3

@@ -1,0 +1,55 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: backend, namespace: resolveiq, labels: {app: backend}}
+spec:
+  replicas: 3
+  strategy: {type: RollingUpdate, rollingUpdate: {maxSurge: 1, maxUnavailable: 0}}
+  selector: {matchLabels: {app: backend}}
+  template:
+    metadata:
+      labels: {app: backend}
+      annotations: {prometheus.io/scrape: "true", prometheus.io/port: "8000", prometheus.io/path: /metrics}
+    spec:
+      securityContext: {runAsNonRoot: true, runAsUser: 10001, seccompProfile: {type: RuntimeDefault}}
+      topologySpreadConstraints:
+        - {maxSkew: 1, topologyKey: kubernetes.io/hostname, whenUnsatisfiable: ScheduleAnyway, labelSelector: {matchLabels: {app: backend}}}
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: backend
+          image: registry.example.com/resolveiq-backend:1.0.0      # CHANGE: your registry
+          ports: [{containerPort: 8000, name: http}]
+          envFrom: [{configMapRef: {name: resolveiq-config}}, {secretRef: {name: resolveiq-secrets}}]
+          # Models are baked into the image but take ~20-40 s to load: use a startup probe rather than a long liveness delay.
+          startupProbe: {httpGet: {path: /health, port: http}, periodSeconds: 5, failureThreshold: 36}
+          readinessProbe: {httpGet: {path: /health/ready, port: http}, periodSeconds: 10, timeoutSeconds: 5, failureThreshold: 3}
+          livenessProbe: {httpGet: {path: /health, port: http}, periodSeconds: 20, timeoutSeconds: 3, failureThreshold: 3}
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
+          resources: {requests: {cpu: "1", memory: 3Gi}, limits: {memory: 5Gi}}   # NLI affect model ~2.5 GB resident
+          volumeMounts: [{name: tmp, mountPath: /tmp}]
+      volumes: [{name: tmp, emptyDir: {}}]
+---
+apiVersion: v1
+kind: Service
+metadata: {name: backend, namespace: resolveiq}
+spec:
+  selector: {app: backend}
+  ports: [{name: http, port: 8000, targetPort: http}]
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata: {name: backend, namespace: resolveiq}
+spec:
+  scaleTargetRef: {apiVersion: apps/v1, kind: Deployment, name: backend}
+  minReplicas: 3
+  maxReplicas: 12
+  metrics:
+    - {type: Resource, resource: {name: cpu, target: {type: Utilization, averageUtilization: 65}}}
+  behavior:
+    scaleDown: {stabilizationWindowSeconds: 300}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata: {name: backend, namespace: resolveiq}
+spec:
+  minAvailable: 2
+  selector: {matchLabels: {app: backend}}

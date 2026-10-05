@@ -1,0 +1,51 @@
+{
+  "description": "Floors for python -m app.evaluation.gate. Set 3-6 points below the recorded run in data/eval/results/latest.json so noise does not flap CI but regressions do. Raise a floor deliberately when a change improves the system.",
+  "checks": [
+    {"path": "classification.strategies.ensemble.test.intent.accuracy", "min": 0.80},
+    {"path": "classification.strategies.ensemble.test.product.accuracy", "min": 0.85},
+    {"path": "classification.strategies.ensemble.gold.intent.accuracy", "min": 0.92},
+    {"path": "classification.strategies.ensemble.gold.product.accuracy", "min": 0.95},
+    {"path": "classification.strategies.ensemble.gold.severity.accuracy", "min": 0.58},
+    {"path": "classification.strategies.ensemble.gold.sentiment.accuracy", "min": 0.58},
+    {"path": "classification.strategies.ensemble.blind.intent.accuracy", "min": 0.92},
+    {"path": "classification.strategies.ensemble.blind.product.accuracy", "min": 0.88},
+    {"path": "classification.strategies.ensemble.blind.severity.accuracy", "min": 0.55},
+    {"path": "classification.strategies.ensemble.blind.sentiment.accuracy", "min": 0.68},
+
+    {"path": "retrieval.tickets.test.dense.hit@5", "min": 0.88},
+    {"path": "retrieval.tickets.test.dense.mrr", "min": 0.72},
+    {"path": "retrieval.tickets.gold.dense.hit@1", "min": 0.85},
+    {"path": "retrieval.tickets.gold.dense.hit@5", "min": 0.95},
+    {"path": "retrieval.tickets.blind.dense.hit@1", "min": 0.84},
+    {"path": "retrieval.tickets.blind.dense.hit@5", "min": 0.94},
+    {"path": "retrieval.articles.test.dense.hit@5", "min": 0.92},
+    {"path": "retrieval.articles.gold.dense.hit@5", "min": 0.97},
+    {"path": "retrieval.stale_article_leaks.returned_count", "max": 0},
+
+    {"path": "robustness.perturbations.clean.intent", "min": 0.90},
+    {"path": "robustness.perturbations.typos.ticket_hit@5", "min": 0.94},
+    {"path": "robustness.perturbations.typos.intent", "min": 0.89},
+    {"path": "robustness.perturbations.no_punctuation_lowercase.ticket_hit@5", "min": 0.94},
+    {"path": "robustness.perturbations.noise_and_signature.ticket_hit@5", "min": 0.94},
+    {"path": "robustness.perturbations.noise_and_signature.intent", "min": 0.90},
+    {"path": "robustness.perturbations.all_caps.ticket_hit@5", "min": 0.94},
+    {"path": "robustness.perturbations.truncated_60pct.ticket_hit@5", "min": 0.93},
+    {"path": "robustness.perturbations.truncated_60pct.intent", "min": 0.86},
+
+    {"path": "evolving.after_ingestion.hit@5", "min": 0.85},
+
+    {"path": "rag.primary.step_faithfulness", "min": 0.97},
+    {"path": "rag.primary.citation_validity", "min": 0.99},
+    {"path": "rag.primary.citation_precision_vs_gold", "min": 0.85},
+    {"path": "rag.primary.gold_step_recall", "min": 0.87},
+    {"path": "e2e.in_domain.correct_resolution_rate", "min": 0.88},
+    {"path": "e2e.in_domain.false_abstention_rate", "max": 0.06},
+    {"path": "e2e.out_of_domain.correct_abstention_rate", "min": 0.90},
+    {"path": "e2e.failures.pipeline_errors", "max": 0},
+
+    {"path": "discovery.candidate_selection.novel_recall", "min": 0.75},
+    {"path": "discovery.proposals.recovered_classes", "min": 3},
+    {"path": "discovery.proposals.precision", "min": 0.5},
+    {"path": "discovery.after_acceptance.routed_correctly_after", "min": 0.4}
+  ]
+}

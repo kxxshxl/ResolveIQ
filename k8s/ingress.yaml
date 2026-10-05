@@ -1,0 +1,17 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: resolveiq
+  namespace: resolveiq
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod              # requires cert-manager
+    nginx.ingress.kubernetes.io/proxy-body-size: 1m
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "90"
+spec:
+  ingressClassName: nginx
+  tls: [{hosts: [support.example.com], secretName: resolveiq-tls}]   # CHANGE: host
+  rules:
+    - host: support.example.com
+      http:
+        paths:
+          - {path: /, pathType: Prefix, backend: {service: {name: frontend, port: {number: 80}}}}

@@ -1,0 +1,18 @@
+# Run once per release BEFORE rolling out the backend.
+apiVersion: batch/v1
+kind: Job
+metadata: {name: resolveiq-migrate, namespace: resolveiq}
+spec:
+  backoffLimit: 2
+  ttlSecondsAfterFinished: 86400
+  template:
+    spec:
+      restartPolicy: Never
+      securityContext: {runAsNonRoot: true, runAsUser: 10001, seccompProfile: {type: RuntimeDefault}}
+      containers:
+        - name: migrate
+          image: registry.example.com/resolveiq-backend:1.0.0      # CHANGE: your registry
+          command: ["sh", "-c", "python -m app.db.migrate && python scripts/seed.py --if-empty"]
+          envFrom: [{configMapRef: {name: resolveiq-config}}, {secretRef: {name: resolveiq-secrets}}]
+          securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
+          resources: {requests: {cpu: 250m, memory: 1Gi}, limits: {memory: 2Gi}}

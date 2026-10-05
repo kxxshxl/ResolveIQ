@@ -1,0 +1,481 @@
+{
+ "uid": "resolveiq-overview",
+ "title": "ResolveIQ - service overview",
+ "schemaVersion": 39,
+ "version": 1,
+ "refresh": "30s",
+ "time": {
+  "from": "now-1h",
+  "to": "now"
+ },
+ "tags": [
+  "resolveiq"
+ ],
+ "panels": [
+  {
+   "id": 1,
+   "type": "timeseries",
+   "title": "HTTP requests / s by route",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 0,
+    "w": 8,
+    "h": 8
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "reqps"
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "sum by (path, status) (rate(resolveiq_http_requests_total[1m]))",
+     "legendFormat": "{{path}} {{status}}"
+    }
+   ]
+  },
+  {
+   "id": 2,
+   "type": "timeseries",
+   "title": "POST /api/v1/resolve latency (p50 / p95)",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "x": 8,
+    "y": 0,
+    "w": 8,
+    "h": 8
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "s"
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "histogram_quantile(0.5, sum by (le) (rate(resolveiq_http_request_latency_seconds_bucket{path=\"/api/v1/resolve\"}[5m])))",
+     "legendFormat": "p50"
+    },
+    {
+     "refId": "B",
+     "expr": "histogram_quantile(0.95, sum by (le) (rate(resolveiq_http_request_latency_seconds_bucket{path=\"/api/v1/resolve\"}[5m])))",
+     "legendFormat": "p95"
+    }
+   ]
+  },
+  {
+   "id": 3,
+   "type": "timeseries",
+   "title": "Pipeline stage latency p95",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "x": 16,
+    "y": 0,
+    "w": 8,
+    "h": 8
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "s"
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "histogram_quantile(0.95, sum by (le, stage) (rate(resolveiq_pipeline_stage_latency_seconds_bucket[5m])))",
+     "legendFormat": "{{stage}}"
+    }
+   ]
+  },
+  {
+   "id": 4,
+   "type": "timeseries",
+   "title": "Retrieval latency p95 by strategy",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 8,
+    "w": 8,
+    "h": 8
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "s"
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "histogram_quantile(0.95, sum by (le, strategy, source_type) (rate(resolveiq_retrieval_latency_seconds_bucket[5m])))",
+     "legendFormat": "{{strategy}}/{{source_type}}"
+    }
+   ]
+  },
+  {
+   "id": 5,
+   "type": "timeseries",
+   "title": "Embedding latency p95 + rerank p95",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "x": 8,
+    "y": 8,
+    "w": 8,
+    "h": 8
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "s"
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "histogram_quantile(0.95, sum by (le, kind) (rate(resolveiq_embedding_latency_seconds_bucket[5m])))",
+     "legendFormat": "embed {{kind}}"
+    },
+    {
+     "refId": "B",
+     "expr": "histogram_quantile(0.95, sum by (le) (rate(resolveiq_rerank_latency_seconds_bucket[5m])))",
+     "legendFormat": "rerank"
+    }
+   ]
+  },
+  {
+   "id": 6,
+   "type": "timeseries",
+   "title": "LLM latency p95 / failures / circuit",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "x": 16,
+    "y": 8,
+    "w": 8,
+    "h": 8
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short"
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "histogram_quantile(0.95, sum by (le, provider) (rate(resolveiq_llm_latency_seconds_bucket[5m])))",
+     "legendFormat": "p95 {{provider}}"
+    },
+    {
+     "refId": "B",
+     "expr": "sum by (provider, reason) (rate(resolveiq_llm_failures_total[5m]))",
+     "legendFormat": "failures {{provider}} {{reason}}"
+    },
+    {
+     "refId": "C",
+     "expr": "resolveiq_llm_circuit_open",
+     "legendFormat": "circuit open {{provider}}"
+    }
+   ]
+  },
+  {
+   "id": 7,
+   "type": "barchart",
+   "title": "Resolution outcomes (1h)",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 16,
+    "w": 8,
+    "h": 8
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short"
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "sum by (status) (increase(resolveiq_resolutions_total[1h]))",
+     "legendFormat": "{{status}}"
+    }
+   ]
+  },
+  {
+   "id": 8,
+   "type": "barchart",
+   "title": "Abstentions by reason (1h)",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "x": 8,
+    "y": 16,
+    "w": 8,
+    "h": 8
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short"
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "sum by (reason) (increase(resolveiq_abstentions_total[1h]))",
+     "legendFormat": "{{reason}}"
+    }
+   ]
+  },
+  {
+   "id": 9,
+   "type": "barchart",
+   "title": "Citation validation failures (1h)",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "x": 16,
+    "y": 16,
+    "w": 8,
+    "h": 8
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short"
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "sum by (type) (increase(resolveiq_citation_validation_failures_total[1h]))",
+     "legendFormat": "{{type}}"
+    }
+   ]
+  },
+  {
+   "id": 10,
+   "type": "timeseries",
+   "title": "Evidence confidence (p10 / p50 / p90)",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 24,
+    "w": 8,
+    "h": 8
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "percentunit"
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "histogram_quantile(0.1, sum by (le) (rate(resolveiq_evidence_confidence_bucket[5m])))",
+     "legendFormat": "p10"
+    },
+    {
+     "refId": "B",
+     "expr": "histogram_quantile(0.5, sum by (le) (rate(resolveiq_evidence_confidence_bucket[5m])))",
+     "legendFormat": "p50"
+    },
+    {
+     "refId": "C",
+     "expr": "histogram_quantile(0.9, sum by (le) (rate(resolveiq_evidence_confidence_bucket[5m])))",
+     "legendFormat": "p90"
+    }
+   ]
+  },
+  {
+   "id": 11,
+   "type": "timeseries",
+   "title": "Classifier confidence p50 by dimension",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "x": 8,
+    "y": 24,
+    "w": 8,
+    "h": 8
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "percentunit"
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "histogram_quantile(0.5, sum by (le, dimension) (rate(resolveiq_classification_confidence_bucket[5m])))",
+     "legendFormat": "{{dimension}}"
+    }
+   ]
+  },
+  {
+   "id": 12,
+   "type": "timeseries",
+   "title": "LLM tokens / s",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "x": 16,
+    "y": 24,
+    "w": 8,
+    "h": 8
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short"
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "sum by (provider, type) (rate(resolveiq_llm_tokens_total[5m]))",
+     "legendFormat": "{{provider}} {{type}}"
+    }
+   ]
+  },
+  {
+   "id": 13,
+   "type": "barchart",
+   "title": "Ingestion (1h) and evaluation runs",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 32,
+    "w": 8,
+    "h": 8
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short"
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "sum by (source_type, result) (increase(resolveiq_ingestion_total[1h]))",
+     "legendFormat": "ingest {{source_type}} {{result}}"
+    },
+    {
+     "refId": "B",
+     "expr": "sum by (suite) (increase(resolveiq_evaluation_runs_total[1h]))",
+     "legendFormat": "eval {{suite}}"
+    }
+   ]
+  },
+  {
+   "id": 14,
+   "type": "stat",
+   "title": "Corpus size",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "x": 8,
+    "y": 32,
+    "w": 8,
+    "h": 8
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short"
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "resolveiq_corpus_documents",
+     "legendFormat": "{{source_type}}"
+    }
+   ]
+  },
+  {
+   "id": 15,
+   "type": "barchart",
+   "title": "Safety: PII redactions / injection flags / rate-limited (1h)",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "x": 16,
+    "y": 32,
+    "w": 8,
+    "h": 8
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short"
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "sum by (type) (increase(resolveiq_pii_redactions_total[1h]))",
+     "legendFormat": "pii {{type}}"
+    },
+    {
+     "refId": "B",
+     "expr": "increase(resolveiq_prompt_injection_flagged_total[1h])",
+     "legendFormat": "injection flags"
+    },
+    {
+     "refId": "C",
+     "expr": "increase(resolveiq_rate_limited_total[1h])",
+     "legendFormat": "rate limited"
+    }
+   ]
+  }
+ ]
+}

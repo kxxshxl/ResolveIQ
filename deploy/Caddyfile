@@ -1,0 +1,27 @@
+# Single public entry point: automatic HTTPS (Let's Encrypt for a real domain, Caddy's internal CA for `localhost`).
+{$SITE_ADDRESS} {
+	# TLS_MODE = "internal" (Caddy's local CA, for trials) or the ACME contact email (Let's Encrypt for a public domain)
+	tls {$TLS_MODE}
+
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+		-Server
+	}
+
+	request_body {
+		max_size 1MB
+	}
+
+	# /metrics is internal-only (Prometheus scrapes the backend directly on the private network).
+	respond /metrics* 404
+
+	reverse_proxy frontend:8080 {
+		health_uri /
+		health_interval 15s
+	}
+}

@@ -1,0 +1,132 @@
+# Local/dev deployment. This is NOT a production topology - see docs/production.md.
+name: resolveiq
+services:
+  db:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-resolveiq}
+      POSTGRES_USER: ${POSTGRES_USER:-resolveiq_owner}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in .env}
+      APP_DB_USER: ${APP_DB_USER:-resolveiq_app}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:?set in .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./infra/postgres/init-roles.sh:/docker-entrypoint-initdb.d/10-init-roles.sh:ro
+    ports: ["127.0.0.1:${DB_HOST_PORT:-5433}:5432"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--maxmemory", "128mb", "--maxmemory-policy", "allkeys-lru"]
+    ports: ["127.0.0.1:${REDIS_HOST_PORT:-6380}:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # One-shot: schema migration (owner role) + idempotent seed of the demo corpus.
+  migrate:
+    build: ./backend
+    command: ["sh", "-c", "python -m app.db.migrate && python scripts/seed.py --if-empty"]
+    environment: &backend-env
+      DATABASE_URL: postgresql://${APP_DB_USER:-resolveiq_app}:${APP_DB_PASSWORD}@db:5432/${POSTGRES_DB:-resolveiq}
+      DATABASE_ADMIN_URL: postgresql://${POSTGRES_USER:-resolveiq_owner}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-resolveiq}
+      REDIS_URL: redis://redis:6379/0
+      API_KEYS: ${API_KEYS:-}
+      RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-120}
+      LLM_PROVIDERS: ${LLM_PROVIDERS:-ollama}
+      # Reuses an Ollama running on the host (or start the bundled one: --profile ollama).
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL_DOCKER:-http://host.docker.internal:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3:4b-instruct}
+      OPENAI_COMPAT_BASE_URL: ${OPENAI_COMPAT_BASE_URL:-}
+      OPENAI_COMPAT_API_KEY: ${OPENAI_COMPAT_API_KEY:-}
+      OPENAI_COMPAT_MODEL: ${OPENAI_COMPAT_MODEL:-}
+      RERANKER_ENABLED: ${RERANKER_ENABLED:-true}
+      DATA_DIR: /app/data
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    volumes:
+      - ./data:/app/data:ro
+    depends_on:
+      db: {condition: service_healthy}
+      redis: {condition: service_healthy}
+
+  # Worker service: runs batch ingestion, evaluation, class discovery and re-index jobs from the Postgres queue so that
+  # CPU-heavy work never competes with interactive /resolve latency. Scale independently: `--scale worker=3`.
+  worker:
+    build: ./backend
+    command: ["python", "-m", "app.worker"]
+    environment:
+      <<: *backend-env
+      JOB_EXECUTION: queue
+      DISCOVERY_SCHEDULE_HOURS: ${DISCOVERY_SCHEDULE_HOURS:-24}
+      WORKER_METRICS_PORT: "9100"
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    volumes:
+      - ./data:/app/data:ro
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:9100/metrics')"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+
+  backend:
+    build: ./backend
+    environment:
+      <<: *backend-env
+      JOB_EXECUTION: queue
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    volumes:
+      - ./data:/app/data:ro
+    ports: ["127.0.0.1:${BACKEND_HOST_PORT:-8100}:8000"]
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  frontend:
+    build: ./frontend
+    ports: ["127.0.0.1:${FRONTEND_HOST_PORT:-5174}:8080"]
+    depends_on: [backend]
+
+  prometheus:
+    image: prom/prometheus:v3.15.0
+    volumes:
+      - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./infra/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+    ports: ["127.0.0.1:${PROMETHEUS_HOST_PORT:-9091}:9090"]
+    depends_on: [backend]
+    profiles: ["monitoring"]
+
+  grafana:
+    image: grafana/grafana:13.2.3
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infra/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports: ["127.0.0.1:${GRAFANA_HOST_PORT:-3001}:3000"]
+    depends_on: [prometheus]
+    profiles: ["monitoring"]
+
+  ollama:
+    image: ollama/ollama:latest
+    volumes: [ollama:/root/.ollama]
+    ports: ["127.0.0.1:${OLLAMA_HOST_PORT:-11435}:11434"]
+    profiles: ["ollama"]
+
+volumes:
+  pgdata:
+  ollama:

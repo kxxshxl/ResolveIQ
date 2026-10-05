@@ -1,0 +1,26 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: worker, namespace: resolveiq, labels: {app: worker}}
+spec:
+  replicas: 1                      # scale on queue depth (resolveiq_job_queue_depth) with KEDA / prometheus-adapter; jobs are SKIP LOCKED safe
+  strategy: {type: RollingUpdate, rollingUpdate: {maxSurge: 1, maxUnavailable: 0}}
+  selector: {matchLabels: {app: worker}}
+  template:
+    metadata:
+      labels: {app: worker}
+      annotations: {prometheus.io/scrape: "true", prometheus.io/port: "9100", prometheus.io/path: /metrics}
+    spec:
+      securityContext: {runAsNonRoot: true, runAsUser: 10001, seccompProfile: {type: RuntimeDefault}}
+      terminationGracePeriodSeconds: 120   # the worker finishes its current job on SIGTERM, then exits
+      containers:
+        - name: worker
+          image: registry.example.com/resolveiq-backend:1.0.0      # CHANGE: same image as the API, different command
+          command: ["python", "-m", "app.worker"]
+          ports: [{containerPort: 9100, name: metrics}]
+          envFrom: [{configMapRef: {name: resolveiq-config}}, {secretRef: {name: resolveiq-secrets}}]
+          startupProbe: {httpGet: {path: /metrics, port: metrics}, periodSeconds: 5, failureThreshold: 60}
+          livenessProbe: {httpGet: {path: /metrics, port: metrics}, periodSeconds: 30, timeoutSeconds: 5, failureThreshold: 3}
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
+          resources: {requests: {cpu: "1", memory: 3Gi}, limits: {memory: 5Gi}}
+          volumeMounts: [{name: tmp, mountPath: /tmp}]
+      volumes: [{name: tmp, emptyDir: {}}]

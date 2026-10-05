@@ -1,0 +1,51 @@
+groups:
+  - name: resolveiq-health
+    rules:
+      - alert: ResolveErrorRateHigh
+        expr: sum(rate(resolveiq_http_requests_total{path="/api/v1/resolve",status=~"5.."}[5m])) / sum(rate(resolveiq_http_requests_total{path="/api/v1/resolve"}[5m])) > 0.02
+        for: 5m
+        labels: {severity: page}
+        annotations: {summary: "More than 2% of /resolve requests are failing"}
+      - alert: ResolveLatencyP95High
+        expr: histogram_quantile(0.95, sum(rate(resolveiq_http_request_latency_seconds_bucket{path="/api/v1/resolve"}[5m])) by (le)) > 15
+        for: 10m
+        labels: {severity: warn}
+        annotations: {summary: "p95 /resolve latency above 15 s (LLM generation dominates; check LLM health and circuit breaker)"}
+      - alert: LLMCircuitOpen
+        expr: max(resolveiq_llm_circuit_open) == 1
+        for: 2m
+        labels: {severity: warn}
+        annotations: {summary: "LLM circuit breaker open: answers are degraded to evidence-only"}
+  - name: resolveiq-quality
+    rules:
+      - alert: AbstentionRateUp
+        expr: resolveiq_recent_abstention_rate > 0.25
+        for: 30m
+        labels: {severity: warn}
+        annotations: {summary: "Abstention above 25%: possible new ticket class or stale KB. Run POST /api/v1/taxonomy/discover and review proposals."}
+      - alert: EvidenceConfidenceDropped
+        expr: resolveiq_recent_mean_evidence < 0.6
+        for: 30m
+        labels: {severity: warn}
+        annotations: {summary: "Mean evidence confidence below 0.6: retrieval regression or vocabulary shift"}
+      - alert: IntentMixDrift
+        expr: resolveiq_drift_js_divergence{dimension="intent"} > 0.1
+        for: 1h
+        labels: {severity: info}
+        annotations: {summary: "Intent distribution drifted from the 14-day baseline"}
+      - alert: NegativeFeedbackHigh
+        expr: resolveiq_recent_negative_feedback_rate > 0.35
+        for: 1h
+        labels: {severity: warn}
+        annotations: {summary: "More than 35% of agent feedback is 'not helpful'"}
+  - name: resolveiq-worker
+    rules:
+      - alert: JobQueueBacklog
+        expr: resolveiq_job_queue_depth{status="queued"} > 20
+        for: 15m
+        labels: {severity: warn}
+        annotations: {summary: "Jobs are queueing faster than the worker drains them: scale the worker"}
+      - alert: WorkerJobsFailing
+        expr: increase(resolveiq_jobs_total{status="failed"}[30m]) > 3
+        labels: {severity: warn}
+        annotations: {summary: "Background jobs are failing repeatedly (see worker logs)"}

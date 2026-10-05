@@ -1,0 +1,30 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: frontend, namespace: resolveiq, labels: {app: frontend}}
+spec:
+  replicas: 2
+  selector: {matchLabels: {app: frontend}}
+  template:
+    metadata: {labels: {app: frontend}}
+    spec:
+      securityContext: {runAsNonRoot: true, runAsUser: 101, seccompProfile: {type: RuntimeDefault}}
+      containers:
+        - name: frontend
+          image: registry.example.com/resolveiq-frontend:1.0.0     # CHANGE: your registry
+          ports: [{containerPort: 8080, name: http}]
+          env:
+            - {name: DNS_RESOLVER, value: kube-dns.kube-system.svc.cluster.local}
+            - {name: BACKEND_URL, value: "http://backend.resolveiq.svc.cluster.local:8000"}
+          readinessProbe: {httpGet: {path: /, port: http}, periodSeconds: 10}
+          livenessProbe: {httpGet: {path: /, port: http}, periodSeconds: 20}
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
+          resources: {requests: {cpu: 50m, memory: 64Mi}, limits: {memory: 128Mi}}
+          volumeMounts: [{name: tmp, mountPath: /tmp}, {name: conf, mountPath: /etc/nginx/conf.d}]
+      volumes: [{name: tmp, emptyDir: {}}, {name: conf, emptyDir: {}}]
+---
+apiVersion: v1
+kind: Service
+metadata: {name: frontend, namespace: resolveiq}
+spec:
+  selector: {app: frontend}
+  ports: [{name: http, port: 80, targetPort: http}]

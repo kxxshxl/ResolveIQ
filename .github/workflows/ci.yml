@@ -1,0 +1,74 @@
+name: ci
+on:
+  push: {branches: [main, master]}
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75   # the CPU-only evaluation run does ~1,500 NLI inferences at ~1.2 s each
+    services:
+      db:
+        image: pgvector/pgvector:pg17
+        env: {POSTGRES_DB: resolveiq, POSTGRES_USER: resolveiq_owner, POSTGRES_PASSWORD: ci-owner-pw}
+        ports: ["5433:5432"]
+        options: >-
+          --health-cmd "pg_isready -U resolveiq_owner" --health-interval 5s --health-timeout 3s --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports: ["6380:6379"]
+    env:
+      DATABASE_URL: postgresql://resolveiq_app:ci-app-pw@127.0.0.1:5433/resolveiq
+      DATABASE_ADMIN_URL: postgresql://resolveiq_owner:ci-owner-pw@127.0.0.1:5433/resolveiq
+      REDIS_URL: redis://127.0.0.1:6380/0
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11", cache: pip, cache-dependency-path: backend/requirements-dev.txt}
+      - name: Install (CPU torch)
+        working-directory: backend
+        run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -r requirements-dev.txt
+      - uses: actions/cache@v4
+        with: {path: ~/.cache/huggingface, key: hf-models-v2-minilm-reranker-deberta-large}
+      - name: Create the least-privilege app role
+        run: PGPASSWORD=ci-owner-pw psql -h 127.0.0.1 -p 5433 -U resolveiq_owner -d resolveiq -c "CREATE ROLE resolveiq_app LOGIN PASSWORD 'ci-app-pw'"
+      - name: Tests
+        working-directory: backend
+        run: python -m pytest tests -q
+      # Quality gate: re-run the label-based evaluations (no LLM needed) and fail on regression versus data/eval/thresholds.json.
+      - name: Seed and evaluate
+        working-directory: backend
+        env: {AFFECT_DEVICE: cpu}
+        run: |
+          python -m app.db.migrate && python scripts/seed.py
+          python -m app.evaluation.run --suites classification retrieval robustness discovery
+      - name: Evaluation regression gate
+        working-directory: backend
+        run: python -m app.evaluation.gate
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: 22, cache: npm, cache-dependency-path: frontend/package-lock.json}
+      - run: npm ci && npm run build
+        working-directory: frontend
+
+  images-and-config:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate production compose
+        run: |
+          python deploy/gen_secrets.py --domain localhost
+          docker compose --env-file .env.prod -f docker-compose.prod.yml config -q
+      - name: Build images
+        run: |
+          docker build --build-arg BAKE_AFFECT=0 -t resolveiq-backend:ci backend
+          docker build -t resolveiq-frontend:ci frontend
+      - name: Validate Kubernetes manifests
+        run: |
+          pip install pyyaml && python -c "import yaml,glob;[list(yaml.safe_load_all(open(f))) for f in glob.glob('k8s/*.yaml')]"

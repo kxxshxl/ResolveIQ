@@ -1,0 +1,43 @@
+# Default-deny, then allow only what the architecture needs.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: default-deny, namespace: resolveiq}
+spec: {podSelector: {}, policyTypes: [Ingress, Egress]}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: allow-backend, namespace: resolveiq}
+spec:
+  podSelector: {matchLabels: {app: backend}}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from: [{podSelector: {matchLabels: {app: frontend}}}, {namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: monitoring}}}]
+      ports: [{port: 8000}]
+  egress:   # DNS, Postgres, Redis, LLM server, HTTPS. Tighten to your environment's CIDRs / selectors.
+    - ports: [{port: 53, protocol: UDP}, {port: 53, protocol: TCP}, {port: 5432}, {port: 6379}, {port: 11434}, {port: 443}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: allow-worker, namespace: resolveiq}
+spec:
+  podSelector: {matchLabels: {app: worker}}
+  policyTypes: [Ingress, Egress]
+  ingress:   # only Prometheus scrapes the worker
+    - from: [{namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: monitoring}}}]
+      ports: [{port: 9100}]
+  egress:
+    - ports: [{port: 53, protocol: UDP}, {port: 53, protocol: TCP}, {port: 5432}, {port: 6379}, {port: 11434}, {port: 443}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: allow-frontend, namespace: resolveiq}
+spec:
+  podSelector: {matchLabels: {app: frontend}}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from: [{namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: ingress-nginx}}}]
+      ports: [{port: 8080}]
+  egress:
+    - to: [{podSelector: {matchLabels: {app: backend}}}]
+      ports: [{port: 8000}]
+    - ports: [{port: 53, protocol: UDP}, {port: 53, protocol: TCP}]

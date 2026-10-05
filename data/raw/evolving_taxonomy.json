@@ -1,0 +1,41 @@
+{
+  "intent": [
+    {
+      "id": "esim_activation",
+      "team": "eSIM provisioning team",
+      "description": "Problems activating, downloading or transferring an eSIM profile using a QR code",
+      "keywords": [
+        "esim",
+        "e-sim",
+        "qr code",
+        "embedded sim",
+        "eid",
+        "digital sim",
+        "virtual sim",
+        "electronic sim",
+        "built-in sim"
+      ],
+      "examples": [
+        "My eSIM QR code will not activate"
+      ]
+    },
+    {
+      "id": "international_roaming",
+      "team": "mobile network specialist",
+      "description": "Mobile service or charges while travelling abroad, including roaming passes and roaming bill shock",
+      "keywords": [
+        "roaming",
+        "abroad",
+        "overseas",
+        "holiday",
+        "travelling",
+        "another country",
+        "outside the country",
+        "trip"
+      ],
+      "examples": [
+        "I have no data while travelling abroad"
+      ]
+    }
+  ]
+}

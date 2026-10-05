@@ -113,6 +113,13 @@ class Settings(BaseSettings):
 
     metrics_token: str = ""  # when set, /metrics requires "Authorization: Bearer <token>"
 
+    # --- tracing (OpenTelemetry; off unless OTEL_TRACES_EXPORTER=otlp|console, see docs/observability.md) ---
+    otel_traces_exporter: str = "none"          # none | otlp | console
+    otel_service_name: str = "resolveiq"        # the API reports as <name>-api, the worker as <name>-worker
+    otel_exporter_otlp_endpoint: str = ""       # OTLP/HTTP base URL, e.g. http://localhost:4318 (empty: SDK default / standard OTEL_* env)
+    otel_exporter_otlp_headers: str = ""        # "k=v,k2=v2", for hosted backends that need an API key
+    otel_sample_ratio: float = 1.0              # head sampling for new traces; a sampled parent is always honoured
+
     def production_problems(self) -> list[str]:
         """Insecure settings that must never reach a production deployment (checked at startup when APP_ENV=production)."""
         problems = []

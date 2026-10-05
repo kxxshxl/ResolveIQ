@@ -9,6 +9,7 @@ import time
 from typing import Awaitable, Callable
 
 from app.models.schemas import TicketIn
+from app.observability import tracing
 from app.observability.metrics import EVAL_RUNS, JOB_DURATION, JOBS
 from app.services.container import Services
 
@@ -39,13 +40,16 @@ async def _reindex(svc: Services, payload: dict, job_id: str) -> dict:
     return await svc.ingestion.reindex()
 
 
+TRACE_KEY = "_trace"  # W3C trace context of the enqueuing request, stored in the job payload
 HANDLERS: dict[str, Handler] = {"ingest_batch": _ingest_batch, "evaluate": _evaluate, "discover_classes": _discover, "reindex": _reindex}
 
 
 async def execute(svc: Services, kind: str, payload: dict, job_id: str) -> dict:
     t0 = time.perf_counter()
+    links = tracing.links_from(payload.pop(TRACE_KEY, None))
     try:
-        result = await HANDLERS[kind](svc, payload, job_id)
+        with tracing.span(f"job.{kind}", {"resolveiq.job_id": job_id, "resolveiq.job_kind": kind}, links=links):
+            result = await HANDLERS[kind](svc, payload, job_id)
         JOBS.labels(kind, "succeeded").inc()
         return result
     except Exception:
@@ -67,7 +71,8 @@ async def run_inline(svc: Services, job_id: str, kind: str, payload: dict) -> No
 
 async def submit(svc: Services, background, kind: str, payload: dict) -> str:
     """Enqueue a job. In queue mode a worker picks it up; in inline mode it runs in this process after the response."""
-    job_id = await svc.repo.create_job(kind, payload)
+    ctx = tracing.inject_context()  # empty (and the payload unchanged) unless tracing is on
+    job_id = await svc.repo.create_job(kind, {**payload, TRACE_KEY: ctx} if ctx else payload)
     if svc.settings.job_execution == "inline":
         background.add_task(run_inline, svc, job_id, kind, payload)
     return job_id

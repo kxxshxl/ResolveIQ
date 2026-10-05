@@ -15,6 +15,7 @@ from app.core.config import Settings
 from app.core.errors import RetrievalError, ValidationFailure
 from app.db.repository import Repository
 from app.models.schemas import RetrievedItem
+from app.observability import tracing
 from app.observability.metrics import RETRIEVAL_FAILURES, RETRIEVAL_LATENCY
 from app.retrieval.bm25 import Bm25Index
 from app.retrieval.fusion import rrf_fuse
@@ -94,6 +95,12 @@ class RetrievalService:
         return float(rows[0]["score"]) if rows else 0.0
 
     # ------------------------------------------------------------- public API
+    @tracing.traced(
+        "retrieval.search",
+        attrs=lambda self, ctx, kind, strategy, k, offset=0: {"resolveiq.retrieval.kind": kind, "resolveiq.retrieval.strategy": strategy,
+                                                              "resolveiq.retrieval.k": k, "resolveiq.retrieval.offset": offset,
+                                                              "resolveiq.retrieval.filters": sorted(ctx.filters or {})},
+        result=lambda items: {"resolveiq.retrieval.returned": len(items), "resolveiq.retrieval.top_score": items[0].score if items else None})
     async def search(self, ctx: QueryContext, kind: str, strategy: str, k: int, offset: int = 0) -> list[RetrievedItem]:
         if strategy not in STRATEGIES:
             raise ValidationFailure(f"unknown retrieval strategy '{strategy}'; choose from {STRATEGIES}")
@@ -144,7 +151,11 @@ class RetrievalService:
                     for i, (sid, rrf, ranks) in enumerate(fused[:k], 1)]
 
         top = fused[: self.s.rerank_top_n]
-        probs = await self.reranker.score(ctx.text, [_rerank_passage(kind, by_id[sid]) for sid, _, _ in top])
+        with tracing.span("retrieval.rerank", {"resolveiq.rerank.model": getattr(self.reranker, "model_name", None),
+                                               "resolveiq.rerank.candidates": len(top), "resolveiq.retrieval.kind": kind}) as sp:
+            probs = await self.reranker.score(ctx.text, [_rerank_passage(kind, by_id[sid]) for sid, _, _ in top])
+            if len(probs) and sp.is_recording():
+                sp.set_attribute("resolveiq.rerank.top_probability", float(max(probs)))
         a = self.s.rerank_blend
         top_rrf = max((r for _, r, _ in top), default=1.0) or 1.0
         blended = [(a * p + (1 - a) * (rrf / top_rrf), p, sid, rrf, ranks) for (sid, rrf, ranks), p in zip(top, probs)]

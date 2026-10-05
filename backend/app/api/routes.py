@@ -17,6 +17,7 @@ from app.api.security import get_services, rate_limit
 from app.core.errors import ConflictError, NotFoundError, RequestTimeout, ValidationFailure
 from app.models.schemas import (ArticleIn, BatchIngestRequest, EvaluateRequest, FeedbackIn, IngestResult, ResolveRequest,
                                 ResolveResponse, TaxonomyLabelIn, TicketIn)
+from app.observability import tracing
 from app.observability.drift import drift_report
 from app.retrieval.service import STRATEGIES
 from app.services.container import Services
@@ -56,6 +57,7 @@ async def ready(svc: Services = Depends(get_services)):
     except Exception:  # noqa: BLE001
         pass
     checks["llm"] = await svc.llm.health() if svc.llm.available else "none configured (evidence-only mode)"
+    checks["tracing"] = tracing.status()
     return JSONResponse({"status": "ready" if ok else "not_ready", "checks": checks}, status_code=200 if ok else 503)
 
 

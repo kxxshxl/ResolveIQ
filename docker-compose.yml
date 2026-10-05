@@ -47,6 +47,10 @@ services:
       OPENAI_COMPAT_API_KEY: ${OPENAI_COMPAT_API_KEY:-}
       OPENAI_COMPAT_MODEL: ${OPENAI_COMPAT_MODEL:-}
       RERANKER_ENABLED: ${RERANKER_ENABLED:-true}
+      # Tracing is off unless OTEL_TRACES_EXPORTER=otlp; `docker compose --profile tracing up` adds a Jaeger UI on :16686 (docs/observability.md).
+      OTEL_TRACES_EXPORTER: ${OTEL_TRACES_EXPORTER:-none}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://jaeger:4318}
+      OTEL_SAMPLE_RATIO: ${OTEL_SAMPLE_RATIO:-1.0}
       DATA_DIR: /app/data
     extra_hosts: ["host.docker.internal:host-gateway"]
     volumes:
@@ -120,6 +124,14 @@ services:
     ports: ["127.0.0.1:${GRAFANA_HOST_PORT:-3001}:3000"]
     depends_on: [prometheus]
     profiles: ["monitoring"]
+
+  # Optional trace viewer: a single container, in-memory storage (traces are lost on restart). OTLP/HTTP in on :4318, UI on :16686.
+  jaeger:
+    image: jaegertracing/jaeger:2.4.0
+    ports:
+      - "127.0.0.1:${JAEGER_UI_PORT:-16686}:16686"
+      - "127.0.0.1:${JAEGER_OTLP_PORT:-4318}:4318"
+    profiles: ["tracing"]
 
   ollama:
     image: ollama/ollama:latest

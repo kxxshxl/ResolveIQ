@@ -54,7 +54,7 @@ flowchart LR
 Python 3.11 · FastAPI/Pydantic/Uvicorn · PostgreSQL 17 + pgvector (HNSW) + built-in full-text search · sentence-transformers
 `all-MiniLM-L6-v2` (384-d) and cross-encoder `ms-marco-MiniLM-L-6-v2` · NLI model `deberta-v3-large-zeroshot-v2.0` for severity /
 sentiment cues · scikit-learn (class discovery clustering) · Ollama with `qwen3:4b-instruct` (default) behind an OpenAI-compatible
-fallback provider · Redis (cache, shared rate limit) · React + Vite · Prometheus (+ alert rules) + Grafana · Docker Compose · Kubernetes manifests · pytest.
+fallback provider · Redis (cache, shared rate limit) · React + Vite · Prometheus (+ alert rules) + Grafana · OpenTelemetry tracing (OTLP, optional Jaeger) · Docker Compose · Kubernetes manifests · pytest.
 One database for vectors, text, taxonomy, jobs and audit keeps the system simple to run and consistent; no paid API is required.
 
 ## 5. Data pipeline
@@ -180,6 +180,20 @@ python scripts/embedding_experiment.py       # embedding-model comparison (no DB
 Writes `data/eval/results/latest.json` and `docs/evaluation_results.md`. `data/eval/results/baseline_v1.json` is the run recorded
 before the affect model, robustness, discovery and worker work (kept for before/after comparison).
 
+## 16. Observability and tracing
+Logs (JSON with `trace_id`) and Prometheus metrics are always on. **OpenTelemetry tracing is opt-in** and shows where the time goes in one
+request: HTTP > `resolve` > preprocess, cache, embedding, classification (incl. the affect model), retrieval, reranking, evidence gate,
+LLM generation, citation validation and the audit write, with Postgres, Redis and LLM-HTTP spans underneath; ingestion and worker jobs are
+traced too (a job links back to the request that queued it).
+```bash
+docker compose --profile tracing up -d jaeger                       # optional viewer, UI on http://127.0.0.1:16686
+export OTEL_TRACES_EXPORTER=otlp OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318    # none (default) | otlp | console
+cd backend && python scripts/dev_server.py                          # then search the tag resolveiq.trace_id=<X-Trace-Id>
+```
+`X-Request-Id` / `X-Trace-Id` / `trace_id` behave exactly as before and are stored on the HTTP span, so a log line, a support ticket or a
+`resolution_requests` row finds its trace; log lines also gain `otel_trace_id` while tracing is on. Spans never contain complaint text, prompts or
+model output (asserted by a test). Details, span reference and configuration: [`docs/observability.md`](docs/observability.md).
+
 ## 17. Evaluation results (recorded run; details in [`docs/evaluation.md`](docs/evaluation.md))
 Held-out paraphrase queries, tickets, n=100:
 
@@ -223,7 +237,7 @@ Implemented: async pooled Postgres, HNSW + GIN, batch embedding, incremental ing
 queue (SKIP LOCKED, heartbeat, retry/backoff, stale-job recovery, scheduled discovery)**, Redis cache + shared rate limit,
 request/LLM/DB timeouts, retries + circuit breaker + provider chain + evidence-only fallback, stateless API, classification
 overlapped with retrieval, Prometheus metrics for both services + 9 validated alert rules + provisioned Grafana dashboard,
-**label-free drift monitoring**, **CI quality gate on evaluation metrics**, JSON logs with trace id, liveness/readiness, non-root containers.
+**label-free drift monitoring**, **CI quality gate on evaluation metrics**, JSON logs with trace id, **opt-in OpenTelemetry tracing (OTLP)**, liveness/readiness, non-root containers.
 
 ## 19. Security
 Pydantic validation; PII redaction before storage/embedding/cache/logs/LLM; secrets only via env (`.env` git-ignored);
@@ -250,7 +264,7 @@ Auth is off only in the dev stack (empty `API_KEYS`, logged as a warning); with 
 Real ticket data and several labellers for severity/sentiment (inter-annotator agreement); fine-tune or distil the NLI affect model
 so it runs at MiniLM cost on CPU; fine-tuned bi-encoder or a similarity-trained reranker; feedback → automatic promotion/review queue
 per-tenant isolation;
-OIDC + TLS; OpenTelemetry tracing; KEDA autoscaling of workers on queue depth; load tests and applying the Kubernetes manifests to a live cluster.
+OIDC + TLS; OpenTelemetry metrics and browser-side tracing (server-side tracing is done); KEDA autoscaling of workers on queue depth; load tests and applying the Kubernetes manifests to a live cluster.
 
 ## Repository layout
 `backend/app` (api, classification, retrieval, rag, ingestion, evaluation, services, db, core, observability) · `backend/tests` ·

@@ -22,6 +22,7 @@ import app  # noqa: F401  (Windows event-loop policy)
 from app.core.config import Settings, get_settings
 from app.core.logging import configure_logging
 from app.jobs import HANDLERS, execute
+from app.observability import tracing
 from app.observability.drift import drift_report, publish_gauges
 from app.observability.metrics import QUEUE_DEPTH
 from app.services.container import Services
@@ -43,7 +44,11 @@ async def run_one(svc: Services, job: dict) -> str:
     hb = asyncio.create_task(_heartbeat(svc, job["job_id"]))
     t0 = time.perf_counter()
     try:
-        result = await asyncio.wait_for(execute(svc, job["kind"], job["payload"] or {}, job["job_id"]), svc.settings.worker_job_timeout_seconds)
+        payload = job["payload"] or {}
+        with tracing.span("worker.job", {"resolveiq.job_id": job["job_id"], "resolveiq.job_kind": job["kind"],
+                                         "resolveiq.job_attempt": job.get("attempts")},
+                          kind=tracing.SpanKind.CONSUMER, links=tracing.links_from(payload.get("_trace"))):
+            result = await asyncio.wait_for(execute(svc, job["kind"], payload, job["job_id"]), svc.settings.worker_job_timeout_seconds)
         await svc.repo.complete_job(job["job_id"], result)
         log.info("job succeeded", extra={"job_id": job["job_id"], "kind": job["kind"], "seconds": round(time.perf_counter() - t0, 2)})
         return "succeeded"
@@ -79,6 +84,7 @@ async def maintenance(svc: Services, s: Settings) -> None:
 async def main() -> None:
     s = get_settings()
     configure_logging()
+    tracing.configure(s, role="worker")
     worker_id = f"{socket.gethostname()}-{os.getpid()}"
     if s.worker_metrics_port:
         start_http_server(s.worker_metrics_port)
@@ -115,6 +121,7 @@ async def main() -> None:
     finally:
         log.info("worker stopping")
         await svc.close()
+        tracing.flush()
 
 
 if __name__ == "__main__":

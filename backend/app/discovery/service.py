@@ -8,6 +8,7 @@ import uuid
 
 import numpy as np
 
+from app.observability import tracing
 from app.classification.taxonomy import TaxonomyService
 from app.core.config import Settings
 from app.core.errors import ConflictError, NotFoundError
@@ -45,6 +46,8 @@ class DiscoveryService:
             neighbors.append(Neighbors([str(t.metadata.get("intent")) for t in tickets], [str(t.metadata.get("product")) for t in tickets], top_t))
         return X, neighbors, evidence
 
+    @tracing.traced("discovery.run", attrs=lambda self, job_id=None, window_days=None: {"resolveiq.job_id": job_id, "resolveiq.discovery.window_days": window_days},
+                    result=lambda r: {f"resolveiq.discovery.{k}": v for k, v in r.items() if isinstance(v, (int, float))})
     async def run(self, job_id: str | None = None, window_days: int | None = None) -> dict:
         t0 = time.perf_counter()
         window = window_days or self.s.discovery_window_days

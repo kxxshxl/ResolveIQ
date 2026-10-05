@@ -16,6 +16,7 @@ from app.api.routes import api, ops
 from app.core.config import Settings, get_settings
 from app.core.errors import ResolveIQError
 from app.core.logging import configure_logging, trace_id_var
+from app.observability import tracing
 from app.observability.metrics import HTTP_LATENCY, HTTP_REQUESTS
 from app.services.container import Services
 from app.services.llm.base import ResilientLLM
@@ -24,7 +25,7 @@ log = logging.getLogger("resolveiq")
 _SAFE_ID = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
 
 
-def create_app(settings: Settings | None = None, llm: ResilientLLM | None = None) -> FastAPI:
+def create_app(settings: Settings | None = None, llm: ResilientLLM | None = None, span_exporter=None) -> FastAPI:
     settings = settings or get_settings()
     configure_logging()
 
@@ -40,6 +41,7 @@ def create_app(settings: Settings | None = None, llm: ResilientLLM | None = None
         log.info("resolveiq ready", extra={"providers": settings.provider_chain, "env": settings.app_env})
         yield
         await app.state.services.close()
+        tracing.flush()
 
     app = FastAPI(
         title="ResolveIQ - Telecom Ticket Resolution Assistant", version="1.0.0", lifespan=lifespan,
@@ -52,6 +54,7 @@ def create_app(settings: Settings | None = None, llm: ResilientLLM | None = None
         incoming = request.headers.get("x-request-id", "")
         trace_id = incoming if _SAFE_ID.match(incoming) else uuid.uuid4().hex[:16]
         token = trace_id_var.set(trace_id)
+        tracing.annotate(resolveiq__trace_id=trace_id)  # the id in X-Trace-Id and logs, searchable on the HTTP span
         start = time.perf_counter()
         status = 500
         try:
@@ -96,6 +99,7 @@ def create_app(settings: Settings | None = None, llm: ResilientLLM | None = None
 
     app.include_router(ops)
     app.include_router(api)
+    tracing.configure(settings, role="api", span_exporter=span_exporter, app=app)  # no-op unless OTEL_TRACES_EXPORTER is set
     return app
 
 

@@ -9,6 +9,7 @@ from app.classification.strategies import (Classifier, Dist, EmbeddingClassifier
                                            RuleClassifier)
 from app.classification.taxonomy import DIMENSIONS, TaxonomyService
 from app.core.config import Settings
+from app.observability import tracing
 from app.models.schemas import Classification, Confidence
 from app.observability.metrics import CLASSIFICATION_CONFIDENCE
 from app.retrieval.service import QueryContext, RetrievalService
@@ -37,6 +38,15 @@ class ComplaintClassifier:
         self.embedding = EmbeddingClassifier(retrieval, k=settings.knn_k)
         self.zero_shot = LLMZeroShotClassifier(llm)
 
+    @tracing.traced(
+        "classify",
+        attrs=lambda self, ctx, strategy=None, allow_llm=True: {"resolveiq.classify.strategy": strategy or self.s.classifier_strategy,
+                                                                "resolveiq.classify.allow_llm": allow_llm},
+        result=lambda c: {"resolveiq.classify.resolved_strategy": c.strategy, "resolveiq.intent": c.intent, "resolveiq.product": c.product,
+                          "resolveiq.severity": c.severity, "resolveiq.sentiment": c.sentiment,
+                          "resolveiq.confidence.intent": c.confidence.intent, "resolveiq.confidence.product": c.confidence.product,
+                          "resolveiq.confidence.severity": c.confidence.severity, "resolveiq.confidence.sentiment": c.confidence.sentiment,
+                          "resolveiq.taxonomy_version": c.taxonomy_version})
     async def classify(self, ctx: QueryContext, strategy: str | None = None, allow_llm: bool = True) -> Classification:
         """Rules + kNN ensemble. With `allow_llm=False` the LLM fallback is skipped so the caller can run
         `refine()` concurrently with other work (the resolve pipeline overlaps it with generation)."""
@@ -74,7 +84,8 @@ class ComplaintClassifier:
         if not weak or not self.llm.available:
             return cls
         try:
-            z = await self.zero_shot.predict(ctx, self.taxonomy.current)
+            with tracing.span("classify.llm_fallback", {"resolveiq.classify.weak_dimensions": weak}):
+                z = await self.zero_shot.predict(ctx, self.taxonomy.current)
         except Exception as exc:  # noqa: BLE001 - classification must never fail the request
             log.warning("llm classification fallback failed", extra={"error": str(exc)[:200]})
             return cls

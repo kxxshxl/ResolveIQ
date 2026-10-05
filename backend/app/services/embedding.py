@@ -10,6 +10,7 @@ from typing import Sequence
 import numpy as np
 
 from app.core.config import Settings
+from app.observability import tracing
 from app.observability.metrics import EMBEDDING_CACHE, EMBEDDING_LATENCY
 from app.services.cache import Cache
 
@@ -36,6 +37,7 @@ class EmbeddingService:
     def warmup(self) -> None:
         self._load().encode(["warmup"], normalize_embeddings=True)
 
+    @tracing.traced("embed.encode", attrs=lambda self, texts: {"resolveiq.embed.model": self.model_name, "resolveiq.batch_size": len(texts)})
     def encode_sync(self, texts: Sequence[str]) -> np.ndarray:
         """Normalised embeddings (cosine == dot product). Batched for throughput."""
         with_timer = time.perf_counter()
@@ -48,10 +50,12 @@ class EmbeddingService:
     async def embed_batch(self, texts: Sequence[str]) -> np.ndarray:
         return await asyncio.to_thread(self.encode_sync, texts)
 
+    @tracing.traced("embed.query", attrs=lambda self, text: {"resolveiq.embed.model": self.model_name})
     async def embed_query(self, text: str) -> np.ndarray:
         key = f"emb:{self.model_name}:{hashlib.sha256(text.encode()).hexdigest()[:32]}"
         if self.cache:
             hit = await self.cache.get(key)
+            tracing.annotate(resolveiq__embed__cache_hit=hit is not None)
             if hit is not None:
                 EMBEDDING_CACHE.labels("hit").inc()
                 return np.asarray(hit, dtype=np.float32)

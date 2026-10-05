@@ -7,6 +7,7 @@ import time
 
 import httpx
 
+from app.observability import tracing
 from app.core.config import Settings
 from app.services.llm.base import LLMResult, ResilientLLM
 
@@ -17,6 +18,7 @@ class OllamaProvider:
     def __init__(self, base_url: str, model: str):
         self.base_url, self.model = base_url.rstrip("/"), model
         self._client = httpx.AsyncClient()
+        tracing.instrument_http_client(self._client)
 
     async def generate(self, system, user, *, json_mode=True, max_tokens=700, temperature=0.1, timeout=45.0) -> LLMResult:
         body = {
@@ -51,6 +53,7 @@ class OpenAICompatProvider:
     def __init__(self, base_url: str, api_key: str, model: str):
         self.base_url, self.api_key, self.model = base_url.rstrip("/"), api_key, model
         self._client = httpx.AsyncClient()
+        tracing.instrument_http_client(self._client)
 
     def _headers(self):
         return {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}

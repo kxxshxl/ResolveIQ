@@ -20,6 +20,7 @@ from pathlib import Path
 
 import numpy as np
 
+from app.observability import tracing
 from app.classification.taxonomy import Taxonomy
 from app.core.config import Settings
 from app.observability.metrics import AFFECT_LATENCY
@@ -126,6 +127,7 @@ class AffectModel:
                 r[dim] = {c: float(v) for c, v in zip(spec["classes"], row)}
         return res
 
+    @tracing.traced("classify.affect", attrs=lambda self, texts: {"resolveiq.batch_size": len(texts)})
     def predict_sync(self, texts: list[str]) -> list[dict[str, dict[str, float]]]:
         t0 = time.perf_counter()
         out = self.combine(self.cue_scores(texts))

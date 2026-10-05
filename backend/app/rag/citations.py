@@ -10,6 +10,7 @@ import re
 
 import numpy as np
 
+from app.observability import tracing
 from app.core.config import Settings
 from app.models.schemas import Citation, Resolution, RetrievedItem, Step, ValidationReport
 from app.observability.metrics import CITATION_FAILURES
@@ -50,6 +51,13 @@ def containment(step: str, units: list[str]) -> float:
     return len(st & ev) / len(st)
 
 
+@tracing.traced(
+    "citations.validate",
+    attrs=lambda resolution, evidence, embedder, settings: {"resolveiq.steps": len(resolution.steps), "resolveiq.evidence_items": len(evidence)},
+    result=lambda r: {"resolveiq.validation.valid": r[2].valid, "resolveiq.validation.citation_coverage": r[2].citation_coverage,
+                      "resolveiq.validation.grounded_ratio": r[2].grounded_ratio, "resolveiq.validation.invalid_citations": len(r[2].invalid_citations),
+                      "resolveiq.validation.uncited_steps": len(r[2].uncited_steps),
+                      "resolveiq.validation.unsupported_steps": len(r[2].unsupported_steps), "resolveiq.citations": len(r[1])})
 async def validate_resolution(resolution: Resolution, evidence: list[RetrievedItem], embedder: EmbeddingService,
                               settings: Settings) -> tuple[Resolution, list[Citation], ValidationReport]:
     valid = {e.source_id: e for e in evidence}

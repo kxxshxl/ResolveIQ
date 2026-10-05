@@ -19,6 +19,7 @@ from app.core.text import looks_like_injection, normalize_text
 from app.db.repository import Repository
 from app.models.schemas import (Classification, EvidenceAssessment, ResolveRequest, ResolveResponse, Resolution,
                                 RetrievedItem, ValidationReport)
+from app.observability import tracing
 from app.observability.metrics import (ABSTENTIONS, CACHE, EVIDENCE_CONFIDENCE, INJECTION_FLAGS, PII_REDACTIONS,
                                        RESOLUTIONS, STAGE_LATENCY)
 from app.rag.citations import validate_resolution
@@ -33,6 +34,23 @@ log = logging.getLogger(__name__)
 DEFAULT_TEAMS = {"broadband": "network specialist", "mobile": "mobile network specialist"}
 
 
+def _resolve_attrs(r: ResolveResponse) -> dict:
+    """Outcome of one resolution as span attributes (labels, scores and timings only; never complaint text)."""
+    c = r.classification
+    attrs = {
+        "resolveiq.request_id": r.request_id, "resolveiq.status": r.status, "resolveiq.confidence": r.confidence,
+        "resolveiq.generator": r.generator, "resolveiq.cached": r.cached, "resolveiq.escalate": r.resolution.escalate,
+        "resolveiq.intent": c.intent, "resolveiq.product": c.product, "resolveiq.severity": c.severity, "resolveiq.sentiment": c.sentiment,
+        "resolveiq.evidence.sufficient": r.evidence.sufficient, "resolveiq.evidence.confidence": r.evidence.confidence,
+        "resolveiq.validation.valid": r.validation.valid, "resolveiq.validation.citation_coverage": r.validation.citation_coverage,
+        "resolveiq.validation.grounded_ratio": r.validation.grounded_ratio,
+        "resolveiq.tickets": len(r.tickets), "resolveiq.articles": len(r.articles), "resolveiq.steps": len(r.resolution.steps),
+        "resolveiq.warnings": len(r.warnings), "resolveiq.pii_redactions": sum(r.pii_redactions.values()),
+    }
+    attrs.update({f"resolveiq.latency_ms.{k}": v for k, v in r.latency_ms.items()})
+    return attrs
+
+
 class ResolutionService:
     def __init__(self, repo: Repository, retrieval: RetrievalService, classifier: ComplaintClassifier,
                  taxonomy: TaxonomyService, llm: ResilientLLM, embedder: EmbeddingService, cache: Cache, settings: Settings):
@@ -43,6 +61,12 @@ class ResolutionService:
         lab = self.taxonomy.current.labels["intent"].get(cls.intent)
         return (lab.team if lab and lab.team else DEFAULT_TEAMS.get(cls.product, "senior support specialist"))
 
+    @tracing.traced(
+        "resolve",
+        attrs=lambda self, req, generate=True, persist=True, use_cache=True: {
+            "resolveiq.strategy": req.strategy or self.s.default_retrieval_strategy, "resolveiq.metadata_filters": req.use_metadata_filters,
+            "resolveiq.generate": generate, "resolveiq.complaint_chars": len(req.complaint)},
+        result=_resolve_attrs)
     async def resolve(self, req: ResolveRequest, generate: bool = True, persist: bool = True,
                       use_cache: bool = True) -> ResolveResponse:
         t_start = time.perf_counter()
@@ -59,22 +83,27 @@ class ResolutionService:
 
         # 1. sanitise + redact (everything downstream, including the LLM prompt and logs, sees redacted text only)
         t = time.perf_counter()
-        clean = normalize_text(req.complaint)
-        red = redact(clean)
-        for k, v in red.counts.items():
-            PII_REDACTIONS.labels(k).inc(v)
         warnings: list[str] = []
-        if looks_like_injection(red.text):
-            INJECTION_FLAGS.inc()
-            warnings.append("Complaint contains instruction-like text; it was treated strictly as data.")
+        with tracing.span("resolve.preprocess"):
+            clean = normalize_text(req.complaint)
+            red = redact(clean)
+            for k, v in red.counts.items():
+                PII_REDACTIONS.labels(k).inc(v)
+            injection = looks_like_injection(red.text)
+            if injection:
+                INJECTION_FLAGS.inc()
+                warnings.append("Complaint contains instruction-like text; it was treated strictly as data.")
+            tracing.annotate(resolveiq__pii_redactions=sum(red.counts.values()), resolveiq__injection_flagged=injection)
         t = tick("preprocess", t)
 
         cache_key = None
         if use_cache:
-            version = f"{await self.repo.corpus_version()}.{self.taxonomy.current.version}"
-            digest = hashlib.sha256(f"{strategy}|{req.use_metadata_filters}|{red.text}".encode()).hexdigest()[:32]
-            cache_key = f"resolve:{version}:{digest}"
-            hit = await self.cache.get(cache_key)
+            with tracing.span("resolve.cache"):
+                version = f"{await self.repo.corpus_version()}.{self.taxonomy.current.version}"
+                digest = hashlib.sha256(f"{strategy}|{req.use_metadata_filters}|{red.text}".encode()).hexdigest()[:32]
+                cache_key = f"resolve:{version}:{digest}"
+                hit = await self.cache.get(cache_key)
+                tracing.annotate(resolveiq__cache_hit=bool(hit))
             if hit:
                 CACHE.labels("resolve", "hit").inc()
                 hit.update(request_id=request_id, trace_id=trace_id, cached=True,
@@ -115,11 +144,15 @@ class ResolutionService:
         t = time.perf_counter()
 
         # 4. evidence gate (abstention is a feature)
-        top_t = await self.retrieval.dense_top_similarity(ctx, "ticket")
-        top_a = await self.retrieval.dense_top_similarity(ctx, "article")
-        assessment = assess_evidence(tickets, articles, top_t, top_a, self.s)
-        EVIDENCE_CONFIDENCE.observe(assessment.confidence)
-        evidence = select_evidence(tickets, articles, self.s)
+        with tracing.span("resolve.evidence"):
+            top_t = await self.retrieval.dense_top_similarity(ctx, "ticket")
+            top_a = await self.retrieval.dense_top_similarity(ctx, "article")
+            assessment = assess_evidence(tickets, articles, top_t, top_a, self.s)
+            EVIDENCE_CONFIDENCE.observe(assessment.confidence)
+            evidence = select_evidence(tickets, articles, self.s)
+            tracing.annotate(resolveiq__evidence__sufficient=assessment.sufficient, resolveiq__evidence__confidence=assessment.confidence,
+                             resolveiq__evidence__top_ticket_similarity=top_t, resolveiq__evidence__top_article_similarity=top_a,
+                             resolveiq__evidence__selected=len(evidence))
 
         status, generator = "abstained", "none"
         resolution: Resolution
@@ -129,6 +162,7 @@ class ResolutionService:
 
         if not assessment.sufficient or not evidence:
             ABSTENTIONS.labels("weak_evidence").inc()
+            tracing.annotate(resolveiq__abstain_reason="weak_evidence")
             resolution = Resolution(
                 issue_summary=f"Customer reports a {cls.product.replace('_', ' ')} problem ({cls.intent.replace('_', ' ')}).",
                 steps=[], escalate=True,
@@ -147,6 +181,7 @@ class ResolutionService:
             resolution.escalate = True
             resolution.escalation_reason = f"Critical severity: involve a {team} while applying these steps."
         if status == "unreliable":
+            tracing.mark_error("citation/grounding validation failed")
             resolution.escalate = True
             resolution.escalation_reason = (resolution.escalation_reason or "") + \
                 f" Automatic citation/grounding checks failed; verify every step with a {team} before acting."
@@ -175,6 +210,7 @@ class ResolutionService:
                                     "strategy": strategy, "latency_ms": lat["total"]})
         return resp
 
+    @tracing.traced("resolve.persist")
     async def _persist(self, resp: ResolveResponse, complaint: str) -> None:
         """Audit trail: redacted complaint + classification + retrieved ids + result (best effort)."""
         try:
@@ -187,6 +223,8 @@ class ResolutionService:
         except Exception as exc:  # noqa: BLE001 - audit write must not fail the response
             log.warning("failed to persist resolution request", extra={"error": str(exc)[:200]})
 
+    @tracing.traced("resolve.generate", attrs=lambda self, complaint, cls, evidence, generate: {"resolveiq.generate": generate, "resolveiq.evidence_items": len(evidence)},
+                    result=lambda r: {"resolveiq.generator": r[1], "resolveiq.generation_status": r[2]})
     async def _generate(self, complaint: str, cls: Classification, evidence: list[RetrievedItem], generate: bool):
         warnings: list[str] = []
         resolution = generator = None
@@ -216,5 +254,6 @@ class ResolutionService:
         if not resolution.steps:  # the model itself declined to answer from the evidence
             status = "abstained"
             ABSTENTIONS.labels("model_declined").inc()
+            tracing.annotate(resolveiq__abstain_reason="model_declined")
         warnings += validation.warnings
         return resolution, generator, status, citations, validation, warnings

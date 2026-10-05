@@ -15,6 +15,7 @@ from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
 from app.core.config import Settings
+from app.observability import tracing
 
 log = logging.getLogger(__name__)
 
@@ -127,6 +128,7 @@ class Repository:
         await self._exec("DELETE FROM taxonomy_labels WHERE dimension=%s AND label_id = ANY(%s)", (dimension, list(label_ids)))
 
     # ------------------------------------------------------------- upserts
+    @tracing.traced("db.upsert_ticket")
     async def upsert_ticket(self, t: dict, embedding: Sequence[float], model: str) -> tuple[int, bool]:
         async with self.pool.connection() as conn:
             async with conn.transaction():
@@ -150,6 +152,7 @@ class Repository:
                 )
         return row["id"], row["created"]
 
+    @tracing.traced("db.upsert_article")
     async def upsert_article(self, a: dict, embedding: Sequence[float], model: str) -> tuple[int, bool]:
         async with self.pool.connection() as conn:
             async with conn.transaction():
@@ -208,6 +211,9 @@ class Repository:
         return ("d.article_id AS source_id, d.title AS title, d.content AS text, d.category AS intent, d.product, "
                 "d.steps AS steps, NULL::text AS resolution_summary, d.updated_at, d.tags, d.metadata")
 
+    @tracing.traced("db.dense_search", attrs=lambda self, kind, query_vec, k, model, filters=None: {"resolveiq.retrieval.kind": kind, "resolveiq.retrieval.k": k,
+                                                                                                   "resolveiq.embed.model": model},
+                    result=lambda rows: {"resolveiq.db.rows": len(rows)})
     async def dense_search(self, kind: str, query_vec: Sequence[float], k: int, model: str,
                            filters: dict | None = None) -> list[dict]:
         meta = KINDS[kind]
@@ -231,6 +237,9 @@ class Repository:
             f"SELECT word, ndoc FROM ts_stat($$SELECT search_text FROM {meta['table']} WHERE status = 'active'$$)")
         return int(n), {r["word"]: int(r["ndoc"]) for r in rows}
 
+    @tracing.traced("db.lexical_search", attrs=lambda self, kind, lexemes, k, filters=None: {"resolveiq.retrieval.kind": kind, "resolveiq.retrieval.k": k,
+                                                                                          "resolveiq.lexical.terms": len(lexemes)},
+                    result=lambda rows: {"resolveiq.db.rows": len(rows)})
     async def lexical_search(self, kind: str, lexemes: list[str], k: int, filters: dict | None = None) -> list[dict]:
         """OR-semantics full-text search over (already stemmed, IDF-pruned) lexemes, ranked by ts_rank_cd."""
         meta = KINDS[kind]
@@ -288,6 +297,7 @@ class Repository:
                         (pk, model, vec_literal(emb)))
 
     # ------------------------------------------------------------- requests / feedback / jobs / evals
+    @tracing.traced("db.save_request")
     async def save_request(self, request_id: str, trace_id: str, complaint: str, classification: dict,
                            retrieved: list[dict], result: dict, status: str, confidence: float, latency_ms: int) -> None:
         await self._exec(

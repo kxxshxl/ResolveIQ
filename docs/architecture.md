@@ -106,7 +106,7 @@ turns noise into signal - a real new topic forms a tight cluster, scattered fals
 | Package | Responsibility |
 |---|---|
 | `api/` | Thin routes, API-key auth + rate limiting dependencies |
-| `core/` | Settings (env only), JSON logging with trace id, errors, PII redaction, text hygiene |
+| `core/` | Settings (env only), JSON logging with trace id (and OTel ids when tracing is on), errors, PII redaction, text hygiene |
 | `db/` | Pooled async repository (all SQL), forward-only migrations, least-privilege grants |
 | `classification/` | `Taxonomy` (DB-backed, versioned), strategies (rules / kNN+prototype / LLM zero-shot), `affect.py` (NLI cue model for severity + sentiment), ensemble |
 | `discovery/` | Emerging-class discovery: pure clustering + proposal builder (`clustering.py`), service with review actions (`service.py`) |

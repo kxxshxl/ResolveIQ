@@ -9,6 +9,7 @@ from typing import Protocol
 
 from app.core.config import Settings
 from app.core.errors import LLMUnavailable
+from app.observability import tracing
 from app.observability.metrics import LLM_CIRCUIT_OPEN, LLM_FAILURES, LLM_LATENCY, LLM_TOKENS
 
 log = logging.getLogger(__name__)
@@ -77,6 +78,14 @@ class ResilientLLM:
     def available(self) -> bool:
         return bool(self.providers)
 
+    @tracing.traced(
+        "llm.generate",
+        attrs=lambda self, system, user, *, json_mode=True, max_tokens=None, temperature=0.1: {
+            "gen_ai.operation.name": "chat", "gen_ai.request.temperature": temperature,
+            "gen_ai.request.max_tokens": max_tokens or self.s.llm_max_tokens, "resolveiq.llm.json_mode": json_mode,
+            "resolveiq.llm.provider_chain": [p.name for p in self.providers], "resolveiq.llm.prompt_chars": len(system) + len(user)},
+        result=lambda r: {"gen_ai.system": r.provider, "gen_ai.response.model": r.model, "gen_ai.usage.input_tokens": r.prompt_tokens,
+                          "gen_ai.usage.output_tokens": r.completion_tokens, "resolveiq.llm.response_chars": len(r.text)})
     async def generate(self, system: str, user: str, *, json_mode: bool = True, max_tokens: int | None = None,
                        temperature: float = 0.1) -> LLMResult:
         errors: list[str] = []
@@ -84,12 +93,17 @@ class ResilientLLM:
             br = self.breakers[p.name]
             if br.is_open:
                 errors.append(f"{p.name}: circuit open")
+                tracing.event("llm.circuit_open", gen_ai__system=p.name)
                 continue
             for attempt in range(self.s.llm_max_retries + 1):
                 t0 = time.perf_counter()
                 try:
-                    res = await p.generate(system, user, json_mode=json_mode, max_tokens=max_tokens or self.s.llm_max_tokens,
-                                           temperature=temperature, timeout=self.s.llm_timeout_seconds)
+                    with tracing.span("llm.call", {"gen_ai.system": p.name, "gen_ai.request.model": p.model, "resolveiq.llm.attempt": attempt}) as sp:
+                        res = await p.generate(system, user, json_mode=json_mode, max_tokens=max_tokens or self.s.llm_max_tokens,
+                                               temperature=temperature, timeout=self.s.llm_timeout_seconds)
+                        if sp.is_recording():
+                            sp.set_attributes(tracing._clean({"gen_ai.usage.input_tokens": res.prompt_tokens,
+                                                              "gen_ai.usage.output_tokens": res.completion_tokens}))
                     LLM_LATENCY.labels(p.name).observe(time.perf_counter() - t0)
                     if res.prompt_tokens:
                         LLM_TOKENS.labels(p.name, "prompt").inc(res.prompt_tokens)

@@ -10,6 +10,7 @@ import time
 import uuid
 from datetime import datetime, timezone
 
+from app.observability import tracing
 from app.classification.pipeline import ComplaintClassifier
 from app.classification.taxonomy import TaxonomyService
 from app.core.config import Settings
@@ -73,6 +74,9 @@ class IngestionService:
         return row, counts, vec
 
     # ------------------------------------------------------------------ single documents
+    @tracing.traced("ingest.ticket", attrs=lambda self, t, source="api": {"resolveiq.ingest.source": source},
+                    result=lambda r: {"resolveiq.ingest.created": r.created, "resolveiq.ingest.pii_redactions": sum(r.pii_redactions.values()),
+                                      "resolveiq.corpus_version": r.corpus_version, "resolveiq.embedding_ms": r.embedding_ms})
     async def ingest_ticket(self, t: TicketIn, source: str = "api") -> IngestResult:
         t0 = time.perf_counter()
         row, counts, vec = await self.prepare_ticket(t, source=source)
@@ -83,6 +87,8 @@ class IngestionService:
         return IngestResult(source_type="ticket", source_id=row["ticket_id"], created=created, pii_redactions=counts,
                             corpus_version=version, embedding_ms=round((time.perf_counter() - t0) * 1000, 1))
 
+    @tracing.traced("ingest.article", result=lambda r: {"resolveiq.ingest.created": r.created, "resolveiq.corpus_version": r.corpus_version,
+                                                         "resolveiq.embedding_ms": r.embedding_ms})
     async def ingest_article(self, a: ArticleIn) -> IngestResult:
         t0 = time.perf_counter()
         self._check_label("intent", a.category)
@@ -102,6 +108,10 @@ class IngestionService:
                             corpus_version=version, embedding_ms=round((time.perf_counter() - t0) * 1000, 1))
 
     # ------------------------------------------------------------------ bulk
+    @tracing.traced("ingest.batch", attrs=lambda self, tickets, source="batch", job_id=None: {"resolveiq.ingest.source": source,
+                                                                                         "resolveiq.batch_size": len(tickets)},
+                    result=lambda r: {"resolveiq.ingest.created": r["created"], "resolveiq.ingest.updated": r["updated"],
+                                      "resolveiq.ingest.failed": r["failed"], "resolveiq.corpus_version": r["corpus_version"]})
     async def ingest_tickets_bulk(self, tickets: list[TicketIn], source: str = "batch", job_id: str | None = None) -> dict:
         """Batch path: ONE embedding call for the whole batch (GPU/CPU friendly), then per-row upserts."""
         texts = [normalize_text(redact(normalize_text(t.complaint_text)).text) for t in tickets]
@@ -127,6 +137,7 @@ class IngestionService:
             await self.repo.update_job(job_id, "succeeded", result=result)
         return result
 
+    @tracing.traced("ingest.reindex", result=lambda r: {f"resolveiq.reindex.{k}": v for k, v in r.items()})
     async def reindex(self, batch_size: int = 256) -> dict[str, int]:
         """Backfill embeddings for the CONFIGURED model (e.g. after switching EMBEDDING_MODEL). Idempotent,
         resumable (only rows lacking an embedding for this model are touched) and safe to run online:

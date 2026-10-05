@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import re
 
+from app.observability import tracing
 from app.core.errors import ResolveIQError
 from app.models.schemas import Classification, Resolution, RetrievedItem, Step
 from app.rag.prompts import SYSTEM_PROMPT, build_user_prompt
@@ -51,6 +52,8 @@ def _overlap(a: str, b: str) -> float:
     return len(ta & tb) / max(1, min(len(ta), len(tb)))
 
 
+@tracing.traced("generate.extractive", attrs=lambda cls, evidence: {"resolveiq.evidence_items": len(evidence)},
+                result=lambda r: {"resolveiq.steps": len(r.steps)})
 def generate_extractive(cls: Classification, evidence: list[RetrievedItem]) -> Resolution:
     """No-LLM fallback: reuse the best ticket's recorded resolution steps and, if they add something,
     the best article's procedure. Every step is copied from (and cites) real evidence by construction."""

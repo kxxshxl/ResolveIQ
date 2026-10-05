@@ -7,6 +7,8 @@ import sys
 import time
 from contextvars import ContextVar
 
+from app.observability.tracing import current_ids
+
 trace_id_var: ContextVar[str] = ContextVar("trace_id", default="-")
 
 _STD_ATTRS = set(logging.makeLogRecord({}).__dict__) | {"message", "asctime"}
@@ -21,6 +23,9 @@ class JsonFormatter(logging.Formatter):
             "msg": record.getMessage(),
             "trace_id": trace_id_var.get(),
         }
+        otel = current_ids()
+        if otel:  # lets a log line be opened as its trace (and back) when tracing is on
+            payload["otel_trace_id"], payload["otel_span_id"] = otel
         for k, v in record.__dict__.items():
             if k not in _STD_ATTRS:
                 payload[k] = v

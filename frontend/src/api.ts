@@ -1,4 +1,4 @@
-import type { ResolveResponse, SearchResponse } from "./types";
+import type { AcceptBody, AcceptResult, Job, Proposal, ResolveResponse, SearchResponse, Taxonomy } from "./types";
 
 export const getKey = () => localStorage.getItem("riq_api_key") ?? "";
 export const setKey = (k: string) => localStorage.setItem("riq_api_key", k);
@@ -31,3 +31,19 @@ export const feedback = (request_id: string, rating: "helpful" | "not_helpful") 
   call<{ feedback_id: number }>("/api/v1/feedback", { method: "POST", body: JSON.stringify({ request_id, rating }) });
 
 export const ready = () => call<{ status: string; checks: Record<string, unknown> }>("/health/ready").catch(() => null);
+
+export const getTaxonomy = () => call<Taxonomy>("/api/v1/taxonomy");
+
+export const listProposals = (status: Proposal["status"] | "all" = "all") =>
+  call<{ items: Proposal[] }>(`/api/v1/taxonomy/proposals?status=${status}`).then((r) => r.items);
+
+export const runDiscovery = (windowDays?: number) =>
+  call<{ job_id: string }>("/api/v1/taxonomy/discover", { method: "POST", body: JSON.stringify(windowDays ? { window_days: windowDays } : {}) });
+
+export const getJob = (id: string) => call<Job>(`/api/v1/jobs/${id}`);
+
+export const acceptProposal = (id: string, body: AcceptBody) =>
+  call<AcceptResult>(`/api/v1/taxonomy/proposals/${id}/accept`, { method: "POST", body: JSON.stringify(body) });
+
+export const rejectProposal = (id: string, note?: string) =>
+  call<{ proposal_id: string; status: string }>(`/api/v1/taxonomy/proposals/${id}/reject`, { method: "POST", body: JSON.stringify(note ? { note } : {}) });

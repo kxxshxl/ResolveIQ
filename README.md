@@ -4,6 +4,15 @@ A production-oriented prototype that turns a raw telecom complaint into a **cite
 previously resolved tickets and knowledge-base (KB) articles - and **abstains and escalates** when the evidence is weak.
 
 
+## Screenshots
+The React UI has two sections: resolving a complaint, and reviewing the classes that emerging-class discovery proposes.
+
+![Resolving a complaint: classification, cited steps, evidence, grounding checks and per-stage latency](docs/screenshots/resolve.png)
+
+| Discovery proposals | Reviewing one (extend an existing intent) | After review (audit trail) |
+|---|---|---|
+| ![Pending proposals with cohesion, evidence and examples](docs/screenshots/discovery-proposals.png) | ![Accept form with merge-into option](docs/screenshots/discovery-review.png) | ![Accepted and rejected proposals with outcomes](docs/screenshots/discovery-decided.png) |
+
 ## 1. Problem statement
 Support agents search past tickets and KB articles by keyword (`router`, `billing`, `speed`). That fails when the same problem is
 worded differently: *"Internet connection disconnects every night"* vs *"My broadband keeps dropping around 8 PM each day"*.
@@ -76,7 +85,8 @@ responsible team. If the LLM is down, the answer is `degraded`: steps copied fro
   tickets arrive). Stale KB: `POST /api/v1/articles/{id}/deprecate`. Embedding model change: per-model embedding rows + `reindex()`.
 * **Classes nobody has named yet** - `POST /api/v1/taxonomy/discover` (also scheduled daily by the worker) clusters recent requests
   the corpus explains poorly and produces reviewable *proposals* (keywords, exemplars, suggested product/team, `new_class` vs
-  `extend_existing`); `.../proposals/{id}/accept|reject` closes the loop. Needed because the abstention gate catches only a minority
+  `extend_existing`); `.../proposals/{id}/accept|reject` closes the loop, and the **Class discovery** tab of the UI does the same for a human reviewer
+  (run discovery, inspect cohesion / evidence / examples, create a new intent or extend an existing one, reject with a reason). Needed because the abstention gate catches only a minority
   of complaints from genuinely new classes - the rest get a confident answer from the nearest existing class.
 * **Label-free drift monitoring** - `GET /api/v1/monitoring/drift` + Prometheus gauges/alerts (abstention rate, evidence confidence,
   intent/severity/sentiment mix shift, negative feedback).
@@ -239,7 +249,7 @@ Auth is off only in the dev stack (empty `API_KEYS`, logged as a warning); with 
 ## 21. Future work
 Real ticket data and several labellers for severity/sentiment (inter-annotator agreement); fine-tune or distil the NLI affect model
 so it runs at MiniLM cost on CPU; fine-tuned bi-encoder or a similarity-trained reranker; feedback → automatic promotion/review queue
-(the discovery proposals UI in the React app is not built yet - proposals are reviewed through the API); per-tenant isolation;
+per-tenant isolation;
 OIDC + TLS; OpenTelemetry tracing; KEDA autoscaling of workers on queue depth; load tests and applying the Kubernetes manifests to a live cluster.
 
 ## Repository layout

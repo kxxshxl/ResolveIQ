@@ -6,7 +6,7 @@ on:
 jobs:
   backend:
     runs-on: ubuntu-latest
-    timeout-minutes: 75   # the CPU-only evaluation run does ~1,500 NLI inferences at ~1.2 s each
+    timeout-minutes: 120  # the CPU-only evaluation run does ~1,500 NLI inferences at ~1.2 s each (~70 min observed)
     services:
       db:
         image: pgvector/pgvector:pg17
@@ -21,6 +21,7 @@ jobs:
       DATABASE_URL: postgresql://resolveiq_app:ci-app-pw@127.0.0.1:5433/resolveiq
       DATABASE_ADMIN_URL: postgresql://resolveiq_owner:ci-owner-pw@127.0.0.1:5433/resolveiq
       REDIS_URL: redis://127.0.0.1:6380/0
+      CLASSIFIER_LLM_FALLBACK: "false"   # no Ollama on the runner; avoids a failed LLM call per ticket
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

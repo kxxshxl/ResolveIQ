@@ -5,7 +5,7 @@ Two supported targets, both verified artefacts in this repository:
 | Target | Use when | Files |
 |---|---|---|
 | **Single host, Docker Compose + automatic HTTPS** | one VM / on-prem box, small-to-medium load | `docker-compose.prod.yml`, `deploy/` |
-| **Kubernetes** | HA, autoscaling, managed Postgres/Redis | `k8s/` |
+| **Kubernetes** | HA, autoscaling, managed Postgres/Redis | `k8s/base/` (cloud), `k8s/local/` (kind; tested, see [kubernetes.md](kubernetes.md)) |
 
 What was actually exercised (on Docker Desktop, Windows 11): the full production Compose stack (2 backend replicas, TLS proxy,
 Prometheus scraping both replicas with a bearer token, Grafana), `deploy/smoke_test.py` (12/12 checks), backup + restore, the
@@ -68,13 +68,16 @@ Prerequisites: ingress-nginx, cert-manager (ClusterIssuer `letsencrypt-prod`), m
 `resolveiq_app` role as in `infra/postgres/init-roles.sh`), managed Redis, an LLM endpoint, a container registry.
 ```bash
 docker build -t <registry>/resolveiq-backend:1.0.0 backend && docker build -t <registry>/resolveiq-frontend:1.0.0 frontend && docker push ...
-# edit image names, host and CORS_ORIGINS in k8s/*.yaml; create the secret (see k8s/secret.example.yaml)
-kubectl apply -f k8s/namespace.yaml
-kubectl apply -f k8s/migrate-job.yaml && kubectl -n resolveiq wait --for=condition=complete job/resolveiq-migrate --timeout=10m
-kubectl apply -k k8s/
+# the image must contain the seed data at /app/data (k8s/local/Dockerfile shows how); edit image names, host, CORS_ORIGINS and
+# OLLAMA_BASE_URL in k8s/base/*.yaml; create the secret (see k8s/base/secret.example.yaml)
+kubectl apply -f k8s/base/namespace.yaml
+kubectl apply -f k8s/base/configmap.yaml                      # the migrate Job reads it
+kubectl apply -f k8s/base/migrate-job.yaml && kubectl -n resolveiq wait --for=condition=complete job/resolveiq-migrate --timeout=15m
+kubectl apply -k k8s/base/
 python deploy/smoke_test.py https://support.example.com --api-key <key>
 ```
-Included: Deployments with startup/readiness/liveness probes, rolling updates (`maxUnavailable: 0`), HPA (3-12 on CPU),
+Tried on a local kind cluster first: `bash k8s/local/deploy.sh --ingress` and `python k8s/local/e2e_test.py --ingress` ([kubernetes.md](kubernetes.md)).
+Included: Deployments with startup/readiness/liveness probes, rolling updates (`maxUnavailable: 0`, `preStop` delay), HPA (3-12 on CPU),
 PodDisruptionBudget, topology spread, restricted pod security (non-root, read-only root fs, no privilege escalation, dropped
 capabilities), default-deny NetworkPolicies, TLS ingress, per-release migration Job. Scrape `/metrics` with the bearer token
 (pod annotations are provided); import `infra/grafana/dashboards/resolveiq.json`.

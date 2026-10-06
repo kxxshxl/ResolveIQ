@@ -155,7 +155,19 @@ python deploy/smoke_test.py https://support.example.com --api-key <agents key>  
 ```
 Only the TLS proxy (Caddy, automatic HTTPS) is public; the API refuses to start in production without strong API keys, explicit
 CORS and non-placeholder DB passwords; `/metrics` is not public; backup/restore scripts, Prometheus + Grafana profile,
-Kubernetes manifests (`k8s/`), and CI are included. Full runbook: [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
+Kubernetes manifests (`k8s/base/`), and CI are included. Full runbook: [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
+
+## 14a. Kubernetes (tested on a local kind cluster)
+```bash
+bash k8s/local/deploy.sh --ingress       # kind cluster, images, Postgres+pgvector, Redis, migrate/seed Job, API x2, worker, frontend x2, Jaeger, Ingress
+python k8s/local/e2e_test.py --ingress   # 22 checks: probes, auth, metrics, real resolve through the Ingress, worker ingestion, traces
+```
+The manifests were applied to a real (single-node) cluster and a complaint was resolved end to end through Ingress → nginx → API → Ollama; with the
+LLM unreachable the API kept answering from evidence only. The run found and fixed seven real defects (missing seed data, Hugging Face calls hanging
+under default-deny egress, an OOM-killed migrate Job, FastAPI's built-in OpenTelemetry duplicating spans, **taxonomy changes not reaching other API
+replicas**, slow failures against a packet-dropping LLM, 502s during rolling restarts). It is **not** a production-grade Kubernetes claim: one node,
+no managed database, no real TLS certificate, kind's network-policy agent. What was and was not tested, the commands, scaling, persistence, secrets,
+ingress/TLS, autoscaling and observability considerations, and what changes in the cloud: [`docs/kubernetes.md`](docs/kubernetes.md).
 
 ## 14b. Development Docker setup
 ```bash
@@ -273,4 +285,4 @@ OIDC + TLS; OpenTelemetry metrics and browser-side tracing (server-side tracing 
 ## Repository layout
 `backend/app` (api, classification, retrieval, rag, ingestion, evaluation, services, db, core, observability) · `backend/tests` ·
 `backend/scripts` (dataset generation, seed, tuning helpers, dev server) · `frontend` · `data/{raw,processed,eval}` · `docs/` ·
-`loadtest/` (Locust load test, harness, raw results) · `infra/` (Postgres role init, Prometheus, Grafana) · `deploy/` (secrets, smoke test, backup, Caddyfile) · `k8s/` · `.github/workflows/ci.yml` · `docker-compose.yml` (dev) · `docker-compose.prod.yml` · `.env.example` · `.env.prod.example`.
+`loadtest/` (Locust load test, harness, raw results) · `infra/` (Postgres role init, Prometheus, Grafana) · `deploy/` (secrets, smoke test, backup, Caddyfile) · `k8s/base/` (cloud manifests) · `k8s/local/` (kind overlay, deploy and test scripts, results) · `.github/workflows/ci.yml` · `docker-compose.yml` (dev) · `docker-compose.prod.yml` · `.env.example` · `.env.prod.example`.

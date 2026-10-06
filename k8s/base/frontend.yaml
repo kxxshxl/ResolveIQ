@@ -17,6 +17,7 @@ spec:
             - {name: BACKEND_URL, value: "http://backend.resolveiq.svc.cluster.local:8000"}
           readinessProbe: {httpGet: {path: /, port: http}, periodSeconds: 10}
           livenessProbe: {httpGet: {path: /, port: http}, periodSeconds: 20}
+          lifecycle: {preStop: {exec: {command: ["sleep", "10"]}}}   # same endpoint-propagation window as the backend
           securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
           resources: {requests: {cpu: 50m, memory: 64Mi}, limits: {memory: 128Mi}}
           volumeMounts: [{name: tmp, mountPath: /tmp}, {name: conf, mountPath: /etc/nginx/conf.d}]

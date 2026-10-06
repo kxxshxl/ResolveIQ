@@ -1,0 +1,70 @@
+# kubectl state at the end of the test run
+Client Version: v1.36.1
+Kustomize Version: v5.8.1
+Server Version: v1.34.0
+
+NAME                            READY   STATUS      RESTARTS   AGE     IP            NODE                      NOMINATED NODE   READINESS GATES
+pod/backend-7f66495579-btkgb    1/1     Running     0          8m58s   10.244.0.65   resolveiq-control-plane   <none>           <none>
+pod/backend-7f66495579-zljp2    1/1     Running     0          17m     10.244.0.62   resolveiq-control-plane   <none>           <none>
+pod/frontend-776bcd757f-5nlb9   1/1     Running     0          29m     10.244.0.41   resolveiq-control-plane   <none>           <none>
+pod/frontend-776bcd757f-r8jfs   1/1     Running     0          29m     10.244.0.40   resolveiq-control-plane   <none>           <none>
+pod/jaeger-64f87b946c-dv6qd     1/1     Running     0          72m     10.244.0.13   resolveiq-control-plane   <none>           <none>
+pod/postgres-0                  1/1     Running     0          74m     10.244.0.7    resolveiq-control-plane   <none>           <none>
+pod/redis-797c7656d-mcxbg       1/1     Running     0          74m     10.244.0.6    resolveiq-control-plane   <none>           <none>
+pod/resolveiq-migrate-x5pwr     0/1     Completed   0          49m     10.244.0.21   resolveiq-control-plane   <none>           <none>
+pod/worker-5f9b45fbf9-9q572     1/1     Running     0          17m     10.244.0.63   resolveiq-control-plane   <none>           <none>
+
+NAME               TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)              AGE   SELECTOR
+service/backend    ClusterIP   10.96.206.113   <none>        8000/TCP             72m   app=backend
+service/frontend   ClusterIP   10.96.157.139   <none>        80/TCP               72m   app=frontend
+service/jaeger     ClusterIP   10.96.73.250    <none>        4318/TCP,16686/TCP   72m   app=jaeger
+service/postgres   ClusterIP   10.96.246.138   <none>        5432/TCP             74m   app=postgres
+service/redis      ClusterIP   10.96.134.54    <none>        6379/TCP             74m   app=redis
+
+NAME                                          REFERENCE            TARGETS         MINPODS   MAXPODS   REPLICAS   AGE
+horizontalpodautoscaler.autoscaling/backend   Deployment/backend   cpu: 101%/65%   2         2         2          72m
+
+NAME                                 MIN AVAILABLE   MAX UNAVAILABLE   ALLOWED DISRUPTIONS   AGE
+poddisruptionbudget.policy/backend   1               N/A               1                     72m
+
+NAME                                  CLASS   HOSTS                 ADDRESS     PORTS     AGE
+ingress.networking.k8s.io/resolveiq   nginx   support.example.com   localhost   80, 443   72m
+
+NAME                                             POD-SELECTOR   AGE
+networkpolicy.networking.k8s.io/allow-backend    app=backend    74m
+networkpolicy.networking.k8s.io/allow-frontend   app=frontend   74m
+networkpolicy.networking.k8s.io/allow-jaeger     app=jaeger     74m
+networkpolicy.networking.k8s.io/allow-migrate    app=migrate    74m
+networkpolicy.networking.k8s.io/allow-postgres   app=postgres   74m
+networkpolicy.networking.k8s.io/allow-redis      app=redis      74m
+networkpolicy.networking.k8s.io/allow-worker     app=worker     74m
+networkpolicy.networking.k8s.io/default-deny     <none>         74m
+
+NAME                                    STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS   VOLUMEATTRIBUTESCLASS   AGE   VOLUMEMODE
+persistentvolumeclaim/data-postgres-0   Bound    pvc-191efad1-0af8-432e-870a-c09c9c88af7a   2Gi        RWO            standard       <unset>                 74m   Filesystem
+
+NAME                        READY   AGE   CONTAINERS   IMAGES
+statefulset.apps/postgres   1/1     74m   postgres     pgvector/pgvector:pg17
+
+NAME                       READY   UP-TO-DATE   AVAILABLE   AGE   CONTAINERS   IMAGES                       SELECTOR
+deployment.apps/backend    2/2     2            2           72m   backend      resolveiq-backend:kind       app=backend
+deployment.apps/frontend   2/2     2            2           72m   frontend     resolveiq-frontend:kind      app=frontend
+deployment.apps/jaeger     1/1     1            1           72m   jaeger       jaegertracing/jaeger:2.4.0   app=jaeger
+deployment.apps/redis      1/1     1            1           74m   redis        redis:7-alpine               app=redis
+deployment.apps/worker     1/1     1            1           72m   worker       resolveiq-backend:kind       app=worker
+
+NAME                          STATUS     COMPLETIONS   DURATION   AGE   CONTAINERS   IMAGES                   SELECTOR
+job.batch/resolveiq-migrate   Complete   1/1           13s        49m   migrate      resolveiq-backend:kind   batch.kubernetes.io/controller-uid=b1d3d8da-4f40-4665-bd0c-1e3bb479e819
+
+NAME                        CPU(cores)   MEMORY(bytes)   
+backend-7f66495579-btkgb    4m           2329Mi          
+backend-7f66495579-zljp2    4m           2327Mi          
+frontend-776bcd757f-5nlb9   4m           25Mi            
+frontend-776bcd757f-r8jfs   1m           27Mi            
+jaeger-64f87b946c-dv6qd     8m           122Mi           
+postgres-0                  11m          89Mi            
+redis-797c7656d-mcxbg       9m           23Mi            
+worker-5f9b45fbf9-9q572     2m           2493Mi          
+
+NAME                      STATUS   ROLES           AGE   VERSION   INTERNAL-IP   EXTERNAL-IP   OS-IMAGE                         KERNEL-VERSION                      CONTAINER-RUNTIME
+resolveiq-control-plane   Ready    control-plane   75m   v1.34.0   172.21.0.2    <none>        Debian GNU/Linux 12 (bookworm)   6.18.40.1-microsoft-standard-WSL2   containerd://2.1.3

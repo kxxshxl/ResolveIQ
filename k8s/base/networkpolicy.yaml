@@ -13,8 +13,8 @@ spec:
   ingress:
     - from: [{podSelector: {matchLabels: {app: frontend}}}, {namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: monitoring}}}]
       ports: [{port: 8000}]
-  egress:   # DNS, Postgres, Redis, LLM server, HTTPS. Tighten to your environment's CIDRs / selectors.
-    - ports: [{port: 53, protocol: UDP}, {port: 53, protocol: TCP}, {port: 5432}, {port: 6379}, {port: 11434}, {port: 443}]
+  egress:   # DNS, Postgres, Redis, LLM server, OTLP (4318), HTTPS. Tighten to your environment's CIDRs / selectors.
+    - ports: [{port: 53, protocol: UDP}, {port: 53, protocol: TCP}, {port: 5432}, {port: 6379}, {port: 11434}, {port: 4318}, {port: 443}]
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -26,7 +26,16 @@ spec:
     - from: [{namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: monitoring}}}]
       ports: [{port: 9100}]
   egress:
-    - ports: [{port: 53, protocol: UDP}, {port: 53, protocol: TCP}, {port: 5432}, {port: 6379}, {port: 11434}, {port: 443}]
+    - ports: [{port: 53, protocol: UDP}, {port: 53, protocol: TCP}, {port: 5432}, {port: 6379}, {port: 11434}, {port: 4318}, {port: 443}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: allow-migrate, namespace: resolveiq}   # the one-off migrate/seed Job: DNS, Postgres and Redis only
+spec:
+  podSelector: {matchLabels: {app: migrate}}
+  policyTypes: [Ingress, Egress]
+  egress:
+    - ports: [{port: 53, protocol: UDP}, {port: 53, protocol: TCP}, {port: 5432}, {port: 6379}]
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy

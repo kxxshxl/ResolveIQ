@@ -1,0 +1,2 @@
+rolling restart took 22 s; 48 requests total, 33 during the rollout
+non-200 responses: 0 []; latency of successful requests: P50 27 ms, P95 57 ms, max 88 ms

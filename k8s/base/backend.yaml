@@ -23,6 +23,9 @@ spec:
           startupProbe: {httpGet: {path: /health, port: http}, periodSeconds: 5, failureThreshold: 36}
           readinessProbe: {httpGet: {path: /health/ready, port: http}, periodSeconds: 10, timeoutSeconds: 5, failureThreshold: 3}
           livenessProbe: {httpGet: {path: /health, port: http}, periodSeconds: 20, timeoutSeconds: 3, failureThreshold: 3}
+          # Keep serving for a few seconds after SIGTERM: the Service/kube-proxy stop routing to a terminating pod a moment AFTER it is told to stop,
+          # and without this delay requests in that window get a 502 (measured: 2 of 127 during a rolling restart, k8s/local/rollout_availability.py).
+          lifecycle: {preStop: {exec: {command: ["sleep", "10"]}}}
           securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
           resources: {requests: {cpu: "1", memory: 3Gi}, limits: {memory: 5Gi}}   # NLI affect model ~2.5 GB resident
           volumeMounts: [{name: tmp, mountPath: /tmp}]

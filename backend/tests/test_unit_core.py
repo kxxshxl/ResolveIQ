@@ -470,3 +470,65 @@ def test_app_refuses_to_start_insecurely_in_production():
     with _pt.raises(RuntimeError, match="insecure production configuration"):
         with TestClient(create_app(Settings(app_env="production"))):
             pass
+
+
+def test_taxonomy_sync_loop_survives_errors_and_stops_on_cancel():
+    """The background sync must keep ticking through a database blip and end cleanly when the service closes."""
+    import asyncio
+    from types import SimpleNamespace
+
+    from app.services.container import Services
+
+    class Flaky:
+        calls = 0
+        current = SimpleNamespace(version=7)
+
+        async def sync_if_changed(self):
+            Flaky.calls += 1
+            if Flaky.calls == 1:
+                raise RuntimeError("connection reset")
+            return Flaky.calls == 2
+
+    async def go():
+        owner = SimpleNamespace(taxonomy=Flaky())
+        task = asyncio.create_task(Services._sync_taxonomy_forever(owner, 0.01))
+        for _ in range(200):
+            if Flaky.calls >= 4:
+                break
+            await asyncio.sleep(0.01)
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        return task.cancelled()
+
+    assert asyncio.run(go()) and Flaky.calls >= 4
+
+
+def test_llm_providers_bound_the_connect_phase_separately_from_the_read_phase():
+    """A host that silently drops packets must fail in seconds (connect), while a slow model keeps its full read time."""
+    import asyncio
+
+    import httpx
+
+    from app.services.llm.providers import OllamaProvider, OpenAICompatProvider, build_llm
+
+    seen = []
+
+    class Stop(Exception):
+        pass
+
+    async def capture(url, **kw):
+        seen.append(kw["timeout"])
+        raise Stop
+
+    async def go():
+        for p in (OllamaProvider("http://x:1", "m", connect_timeout=5.0), OpenAICompatProvider("http://x:1", "", "m", connect_timeout=5.0)):
+            p._client.post = capture
+            with pytest.raises(Stop):
+                await p.generate("s", "u", timeout=45.0)
+            with pytest.raises(Stop):
+                await p.generate("s", "u", timeout=2.0)  # never longer than the attempt itself
+
+    asyncio.run(go())
+    assert [(t.connect, t.read) for t in seen] == [(5.0, 45.0), (2.0, 2.0)] * 2 and all(isinstance(t, httpx.Timeout) for t in seen)
+    configured = build_llm(Settings(llm_providers="ollama", llm_connect_timeout_seconds=1.5)).providers[0]
+    assert configured.connect_timeout == 1.5

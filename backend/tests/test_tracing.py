@@ -59,6 +59,19 @@ def test_attribute_cleaning_never_fails_on_odd_values():
     assert "a" not in out and out["b"] == 1 and out["c"] == [1, 2] and out["d"] == "{'x': 1}" and isinstance(out["e"], str) and out["f"] == ["x", 2]
 
 
+def test_fastapi_native_telemetry_is_switched_off(monkeypatch):
+    """FastAPI >= 0.142 auto-enables its own OTLP traces/metrics/logs when a standard OTEL_EXPORTER_OTLP_ENDPOINT is in the
+    process environment (how Kubernetes sets it). That would duplicate our spans and export exception text, so it must stay off."""
+    from app.main import create_app
+
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://collector.invalid:4318")
+    app = create_app(Settings())
+    cfg = getattr(app, "_telemetry", None)
+    if cfg is None:
+        pytest.skip("this FastAPI version has no native telemetry")
+    assert not cfg["auto_configure"] and not any(cfg[k] for k in ("tracing", "metrics", "logs", "operation_spans"))
+
+
 # ---------------------------------------------------------------------------------------------- with a real span pipeline
 @pytest.fixture(scope="module")
 def traced(test_settings, test_database):

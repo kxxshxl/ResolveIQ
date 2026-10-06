@@ -39,6 +39,7 @@ class Settings(BaseSettings):
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
     embedding_dim: int = 384
     embedding_unit_cache_size: int = 20000   # in-process LRU of embeddings for evidence text used by citation validation (0 = off); ~30 MB at 20k
+    taxonomy_sync_seconds: float = 10.0         # how often each process checks Postgres for a taxonomy change made by another replica (0 = off)
     embedding_batch_size: int = 64
     reranker_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
     reranker_enabled: bool = True
@@ -85,6 +86,7 @@ class Settings(BaseSettings):
     openai_compat_api_key: str = ""
     openai_compat_model: str = ""
     llm_timeout_seconds: float = 45.0       # one attempt
+    llm_connect_timeout_seconds: float = 5.0  # reaching the model server; a host that drops packets then fails in seconds, not after the whole budget
     llm_total_budget_seconds: float = 30.0  # all attempts and providers for one generation; MUST stay below request_timeout_seconds,
                                             # otherwise a hung LLM turns every request into a 504 instead of the evidence-only fallback
     llm_max_retries: int = 1

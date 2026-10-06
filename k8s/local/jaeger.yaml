@@ -1,0 +1,27 @@
+# Optional trace viewer for the LOCAL cluster: one pod, in-memory storage (traces are lost on restart). OTLP/HTTP on :4318, UI on :16686.
+# Enabled by the OTEL_* patch in kustomization.yaml. Production sends to a real collector / backend (docs/observability.md).
+apiVersion: v1
+kind: Service
+metadata: {name: jaeger, namespace: resolveiq}
+spec:
+  selector: {app: jaeger}
+  ports: [{name: otlp-http, port: 4318, targetPort: otlp-http}, {name: ui, port: 16686, targetPort: ui}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: jaeger, namespace: resolveiq, labels: {app: jaeger}}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: jaeger}}
+  template:
+    metadata: {labels: {app: jaeger}}
+    spec:
+      securityContext: {runAsNonRoot: true, runAsUser: 10001, seccompProfile: {type: RuntimeDefault}}
+      containers:
+        - name: jaeger
+          image: jaegertracing/jaeger:2.4.0
+          ports: [{containerPort: 4318, name: otlp-http}, {containerPort: 16686, name: ui}]
+          readinessProbe: {tcpSocket: {port: ui}, periodSeconds: 10}
+          livenessProbe: {tcpSocket: {port: ui}, periodSeconds: 20, failureThreshold: 6}
+          securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
+          resources: {requests: {cpu: 50m, memory: 128Mi}, limits: {memory: 512Mi}}

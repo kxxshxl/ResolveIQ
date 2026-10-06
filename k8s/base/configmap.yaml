@@ -1,0 +1,34 @@
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: resolveiq-config, namespace: resolveiq}
+data:
+  APP_ENV: production
+  CACHE_NAMESPACE: prod
+  CORS_ORIGINS: https://support.example.com        # CHANGE: public origin of the UI
+  RATE_LIMIT_PER_MINUTE: "120"
+  REQUEST_TIMEOUT_SECONDS: "60"
+  LLM_PROVIDERS: ollama
+  OLLAMA_BASE_URL: http://ollama.llm.svc.cluster.local:11434   # CHANGE: your Ollama / vLLM service
+  OLLAMA_MODEL: qwen3:4b-instruct
+  DATA_DIR: /app/data                   # the image must contain the seed data here (k8s/local/Dockerfile shows how)
+  HF_HUB_OFFLINE: "1"                    # the model weights are baked into the image; never call the Hugging Face Hub (a default-deny egress policy would make that call hang)
+  TRANSFORMERS_OFFLINE: "1"
+  JOB_EXECUTION: queue                  # API enqueues; the worker Deployment executes
+  DISCOVERY_SCHEDULE_HOURS: "24"        # worker enqueues a class-discovery run daily
+  AFFECT_CPU_THREADS: "2"
+  # --- LLM resilience (measured in docs/performance.md; the defaults are the recommended production values) ---
+  LLM_TIMEOUT_SECONDS: "45"
+  LLM_TOTAL_BUDGET_SECONDS: "30"        # must stay below REQUEST_TIMEOUT_SECONDS or the evidence-only fallback can never answer
+  LLM_MAX_CONCURRENCY: "1"              # per replica: a single local model serves one generation at a time (more only lengthens the tail)
+  LLM_QUEUE_WAIT_SECONDS: "5"
+  LLM_CIRCUIT_FAILURE_THRESHOLD: "3"
+  LLM_CIRCUIT_COOLDOWN_SECONDS: "30"
+  CACHE_TTL_SECONDS: "300"
+  CACHE_DEGRADED_TTL_SECONDS: "30"
+  # --- OpenTelemetry tracing: opt-in. none = off (no overhead); otlp = export to a collector / Jaeger; console = log spans.
+  # The API reports as <OTEL_SERVICE_NAME>-api and the worker as <OTEL_SERVICE_NAME>-worker. Credentials for a hosted backend
+  # (OTEL_EXPORTER_OTLP_HEADERS) belong in the Secret, not here.
+  OTEL_TRACES_EXPORTER: "none"
+  OTEL_SERVICE_NAME: resolveiq
+  OTEL_SAMPLE_RATIO: "1.0"              # head sampling for new traces; lower it (e.g. 0.1) under real traffic
+  # OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector.observability.svc.cluster.local:4318   # set together with OTEL_TRACES_EXPORTER=otlp

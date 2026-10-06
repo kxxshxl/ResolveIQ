@@ -1,0 +1,14 @@
+# NetworkPolicy enforcement (kindnet) - connection attempts with a 3 s timeout, after restarting the kindnet agent
+# NOTE: the first version of this check, taken after the memory-starvation incident, showed the frontend reaching postgres/redis/jaeger:
+# kindnet's policy agent had lost its API watch and failed OPEN. Restarting the kindnet DaemonSet restored enforcement.
+from pod/frontend-776bcd757f-5nlb9 (app=frontend)
+  backend:8000 REACHABLE
+  postgres:5432 blocked/timeout
+  redis:6379 blocked/timeout
+  jaeger:4318 blocked/timeout
+from pod/backend-7f66495579-btkgb (app=backend)
+   postgres 5432 REACHABLE
+   redis 6379 REACHABLE
+   jaeger 4318 REACHABLE
+   frontend 8080 blocked/ TimeoutError
+   host.docker.internal 11434 REACHABLE

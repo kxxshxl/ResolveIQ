@@ -71,6 +71,15 @@ class TaxonomyService:
         log.info("taxonomy loaded", extra={"version": tax.version, **{d: len(tax.labels[d]) for d in DIMENSIONS}})
         return tax
 
+    async def sync_if_changed(self) -> bool:
+        """Reload when another replica (or the worker) moved the taxonomy version. The taxonomy lives in Postgres but each process
+        caches it with prototype embeddings; without this a class accepted through one API replica stays invisible to the others
+        until they restart. One indexed `max(version)` read; the reload (embedding the prototypes) only happens on a change."""
+        if await self.repo.taxonomy_version() == self.current.version:
+            return False
+        await self.refresh()
+        return True
+
     async def add_label(self, dimension: str, label_id: str, description: str, keywords: list[str], examples: list[str],
                         team: str | None = None) -> Taxonomy:
         await self.repo.add_taxonomy_labels(

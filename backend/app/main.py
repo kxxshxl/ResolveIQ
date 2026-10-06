@@ -1,6 +1,7 @@
 """FastAPI application factory."""
 from __future__ import annotations
 
+import inspect
 import logging
 import re
 import time
@@ -24,6 +25,14 @@ from app.services.llm.base import ResilientLLM
 log = logging.getLogger("resolveiq")
 _SAFE_ID = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
 
+# FastAPI >= 0.142 ships its own OpenTelemetry integration that switches itself on, for traces, metrics AND logs (exception messages
+# and stack traces), as soon as a standard OTEL_EXPORTER_OTLP_ENDPOINT is present in the process environment, which is exactly how
+# Kubernetes configures it. We trace through app.observability.tracing (opt-in, scrubbed of complaint text, one span tree), so
+# the native one is switched off to avoid duplicate spans, an unwanted OTLP metrics/logs export and exception text leaving the pod.
+_NO_NATIVE_TELEMETRY = (
+    {"telemetry": {"tracing": False, "metrics": False, "logs": False, "operation_spans": False, "auto_configure": False}}
+    if "telemetry" in inspect.signature(FastAPI.__init__).parameters else {})
+
 
 def create_app(settings: Settings | None = None, llm: ResilientLLM | None = None, span_exporter=None) -> FastAPI:
     settings = settings or get_settings()
@@ -45,7 +54,7 @@ def create_app(settings: Settings | None = None, llm: ResilientLLM | None = None
 
     app = FastAPI(
         title="ResolveIQ - Telecom Ticket Resolution Assistant", version="1.0.0", lifespan=lifespan,
-        description="Semantic retrieval + grounded, cited resolutions for telecom support agents.")
+        description="Semantic retrieval + grounded, cited resolutions for telecom support agents.", **_NO_NATIVE_TELEMETRY)
     origins = [o.strip() for o in settings.cors_origins.split(",") if o.strip()]
     app.add_middleware(CORSMiddleware, allow_origins=origins, allow_methods=["*"], allow_headers=["*"])
 

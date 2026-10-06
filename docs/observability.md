@@ -155,3 +155,17 @@ cd backend && python -m pytest tests/test_tracing.py -q      # DB tests need `do
 * The bundled Jaeger keeps traces in memory. For retention use a real backend (Tempo, Jaeger with storage) through the same OTLP endpoint.
 * The frontend is not instrumented; a browser-originated trace would start at the API (or at the gateway, via `traceparent`).
 * Kubernetes manifests do not yet set the `OTEL_*` variables.
+
+## Kubernetes
+
+The ConfigMap carries the same switches (`OTEL_TRACES_EXPORTER` = `none` by default, `OTEL_SERVICE_NAME`, `OTEL_SAMPLE_RATIO`,
+`OTEL_EXPORTER_OTLP_ENDPOINT`); credentials for a hosted backend (`OTEL_EXPORTER_OTLP_HEADERS`) belong in the Secret. The local overlay
+(`k8s/local/`) turns tracing on and sends it to an in-cluster Jaeger (`kubectl -n resolveiq port-forward svc/jaeger 16686:16686`); tested: the
+API and the worker both appear as services, and one resolve is one tree of 34-38 spans with a single server span (find it by the
+`resolveiq.trace_id` tag, which equals the `X-Trace-Id` header and the nginx request id).
+
+Gotcha found there: FastAPI >= 0.142 switches on its **own** OpenTelemetry (traces, metrics, and logs including exception text) whenever
+`OTEL_EXPORTER_OTLP_ENDPOINT` is set in the process environment, which is how Kubernetes sets it. The application disables that native
+integration (`app/main.py`) so there is exactly one span tree, nothing is exported to the metrics/logs OTLP paths, and exception messages stay
+in the pod. `/metrics` stays token-protected: scrape it with a ServiceMonitor that reads the bearer token from a Secret (annotation-based
+scraping cannot send a token).

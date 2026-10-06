@@ -1,0 +1,6 @@
+rolling restart took 181 s; 111 requests total, 103 during the rollout
+non-200 responses: 4 [0, 502]; latency of successful requests: P50 24 ms, P95 38 ms, max 58 ms
+  failed at +-5.0 s: HTTP 0 after 30012 ms
+  failed at +25.0 s: HTTP 0 after 30010 ms
+  failed at +55.0 s: HTTP 0 after 30006 ms
+  failed at +85.0 s: HTTP 502 after 30023 ms

@@ -72,4 +72,4 @@ jobs:
           docker build -t resolveiq-frontend:ci frontend
       - name: Validate Kubernetes manifests
         run: |
-          pip install pyyaml && python -c "import yaml,glob;[list(yaml.safe_load_all(open(f))) for f in glob.glob('k8s/*.yaml')]"
+          pip install pyyaml && python -c "import yaml,glob;[list(yaml.safe_load_all(open(f))) for f in glob.glob('k8s/*/*.yaml')]"

@@ -1,0 +1,30 @@
+# Overlay for the local kind cluster: the unmodified base (../base) plus in-cluster Postgres/Redis/Jaeger and sizes that fit one laptop.
+#   kubectl apply -k k8s/local        (after the secrets exist and the images are loaded; see docs/production.md)
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: resolveiq
+resources: [../base, postgres.yaml, redis.yaml, jaeger.yaml, networkpolicy-local.yaml]
+images:
+  - {name: registry.example.com/resolveiq-backend, newName: resolveiq-backend, newTag: kind}
+  - {name: registry.example.com/resolveiq-frontend, newName: resolveiq-frontend, newTag: kind}
+patches:
+  - target: {kind: ConfigMap, name: resolveiq-config}
+    patch: |-
+      - {op: replace, path: /data/CORS_ORIGINS, value: "http://localhost:8080"}
+      - {op: replace, path: /data/OLLAMA_BASE_URL, value: "http://host.docker.internal:11434"}
+      - {op: replace, path: /data/OTEL_TRACES_EXPORTER, value: "otlp"}
+      - {op: add, path: /data/OTEL_EXPORTER_OTLP_ENDPOINT, value: "http://jaeger.resolveiq.svc.cluster.local:4318"}
+  - target: {kind: Deployment, name: backend}
+    patch: |-
+      - {op: replace, path: /spec/replicas, value: 2}
+      - {op: replace, path: /spec/template/spec/containers/0/resources, value: {requests: {cpu: 500m, memory: 2Gi}, limits: {memory: 4Gi}}}
+  - target: {kind: Deployment, name: worker}
+    patch: |-
+      - {op: replace, path: /spec/template/spec/containers/0/resources, value: {requests: {cpu: 500m, memory: 2Gi}, limits: {memory: 4Gi}}}
+  - target: {kind: HorizontalPodAutoscaler, name: backend}
+    patch: |-
+      - {op: replace, path: /spec/minReplicas, value: 2}
+      - {op: replace, path: /spec/maxReplicas, value: 2}   # each replica holds ~2.4 GB of models: three plus a rollout surge exhausted a 15 GB Docker VM
+  - target: {kind: PodDisruptionBudget, name: backend}
+    patch: |-
+      - {op: replace, path: /spec/minAvailable, value: 1}

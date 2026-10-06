@@ -1,0 +1,67 @@
+# In-cluster Postgres 17 + pgvector for the LOCAL cluster only: a single-replica StatefulSet on a PersistentVolumeClaim.
+# Production uses a managed Postgres (see docs/production.md); this exists so the stack can be tested end to end on kind.
+# The least-privilege role is created by the same script as in docker-compose (infra/postgres/init-roles.sh).
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: postgres-init, namespace: resolveiq}
+data:
+  10-init-roles.sh: |
+    #!/bin/sh
+    set -e
+    psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<SQL
+    DO \$\$
+    BEGIN
+      IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '${APP_DB_USER}') THEN
+        CREATE ROLE ${APP_DB_USER} LOGIN PASSWORD '${APP_DB_PASSWORD}' NOSUPERUSER NOCREATEDB NOCREATEROLE;
+      END IF;
+    END
+    \$\$;
+    GRANT CONNECT ON DATABASE ${POSTGRES_DB} TO ${APP_DB_USER};
+    SQL
+---
+apiVersion: v1
+kind: Service
+metadata: {name: postgres, namespace: resolveiq}
+spec:
+  selector: {app: postgres}
+  ports: [{name: pg, port: 5432, targetPort: pg}]
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata: {name: postgres, namespace: resolveiq, labels: {app: postgres}}
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector: {matchLabels: {app: postgres}}
+  template:
+    metadata: {labels: {app: postgres}}
+    spec:
+      securityContext: {runAsNonRoot: true, runAsUser: 999, runAsGroup: 999, fsGroup: 999, seccompProfile: {type: RuntimeDefault}}
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: postgres
+          image: pgvector/pgvector:pg17
+          args: ["postgres", "-c", "max_connections=100", "-c", "shared_buffers=256MB", "-c", "log_min_duration_statement=500"]
+          ports: [{containerPort: 5432, name: pg}]
+          env:
+            - {name: POSTGRES_DB, value: resolveiq}
+            - {name: POSTGRES_USER, value: resolveiq_owner}
+            - {name: APP_DB_USER, value: resolveiq_app}
+            - {name: PGDATA, value: /var/lib/postgresql/data/pgdata}
+            - {name: POSTGRES_PASSWORD, valueFrom: {secretKeyRef: {name: resolveiq-postgres, key: POSTGRES_PASSWORD}}}
+            - {name: APP_DB_PASSWORD, valueFrom: {secretKeyRef: {name: resolveiq-postgres, key: APP_DB_PASSWORD}}}
+          startupProbe: {exec: {command: ["pg_isready", "-U", "resolveiq_owner", "-d", "resolveiq"]}, periodSeconds: 3, failureThreshold: 40}
+          readinessProbe: {exec: {command: ["pg_isready", "-U", "resolveiq_owner", "-d", "resolveiq"]}, periodSeconds: 10, timeoutSeconds: 5}
+          livenessProbe: {exec: {command: ["pg_isready", "-U", "resolveiq_owner", "-d", "resolveiq"]}, periodSeconds: 20, timeoutSeconds: 5, failureThreshold: 6}
+          securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
+          resources: {requests: {cpu: 250m, memory: 512Mi}, limits: {memory: 1Gi}}
+          volumeMounts:
+            - {name: data, mountPath: /var/lib/postgresql/data}
+            - {name: run, mountPath: /var/run/postgresql}
+            - {name: init, mountPath: /docker-entrypoint-initdb.d, readOnly: true}
+      volumes:
+        - {name: run, emptyDir: {}}
+        - {name: init, configMap: {name: postgres-init, defaultMode: 0555}}
+  volumeClaimTemplates:
+    - metadata: {name: data}
+      spec: {accessModes: [ReadWriteOnce], resources: {requests: {storage: 2Gi}}}

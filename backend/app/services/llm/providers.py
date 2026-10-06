@@ -12,11 +12,17 @@ from app.core.config import Settings
 from app.services.llm.base import LLMResult, ResilientLLM
 
 
+def _timeout(total: float, connect: float) -> httpx.Timeout:
+    """`total` bounds reading the answer (a model may legitimately think for many seconds); `connect` bounds reaching the server. A host that
+    silently drops packets (a network policy, a partition, a dead node) would otherwise cost the whole generation budget on every probe."""
+    return httpx.Timeout(total, connect=min(total, connect))
+
+
 class OllamaProvider:
     name = "ollama"
 
-    def __init__(self, base_url: str, model: str):
-        self.base_url, self.model = base_url.rstrip("/"), model
+    def __init__(self, base_url: str, model: str, connect_timeout: float = 5.0):
+        self.base_url, self.model, self.connect_timeout = base_url.rstrip("/"), model, connect_timeout
         self._client = httpx.AsyncClient()
         tracing.instrument_http_client(self._client)
 
@@ -31,7 +37,7 @@ class OllamaProvider:
         if json_mode:
             body["format"] = "json"
         t0 = time.perf_counter()
-        r = await self._client.post(f"{self.base_url}/api/chat", json=body, timeout=timeout)
+        r = await self._client.post(f"{self.base_url}/api/chat", json=body, timeout=_timeout(timeout, self.connect_timeout))
         r.raise_for_status()
         d = r.json()
         return LLMResult(
@@ -50,8 +56,8 @@ class OpenAICompatProvider:
 
     name = "openai_compat"
 
-    def __init__(self, base_url: str, api_key: str, model: str):
-        self.base_url, self.api_key, self.model = base_url.rstrip("/"), api_key, model
+    def __init__(self, base_url: str, api_key: str, model: str, connect_timeout: float = 5.0):
+        self.base_url, self.api_key, self.model, self.connect_timeout = base_url.rstrip("/"), api_key, model, connect_timeout
         self._client = httpx.AsyncClient()
         tracing.instrument_http_client(self._client)
 
@@ -67,7 +73,7 @@ class OpenAICompatProvider:
         if json_mode:
             body["response_format"] = {"type": "json_object"}
         t0 = time.perf_counter()
-        r = await self._client.post(f"{self.base_url}/chat/completions", json=body, headers=self._headers(), timeout=timeout)
+        r = await self._client.post(f"{self.base_url}/chat/completions", json=body, headers=self._headers(), timeout=_timeout(timeout, self.connect_timeout))
         r.raise_for_status()
         d = r.json()
         text = re.sub(r"<think>.*?</think>", "", d["choices"][0]["message"]["content"] or "", flags=re.S).strip()
@@ -115,10 +121,10 @@ def build_llm(settings: Settings) -> ResilientLLM:
     providers = []
     for name in settings.provider_chain:
         if name == "ollama":
-            providers.append(OllamaProvider(settings.ollama_base_url, settings.ollama_model))
+            providers.append(OllamaProvider(settings.ollama_base_url, settings.ollama_model, settings.llm_connect_timeout_seconds))
         elif name == "openai_compat" and settings.openai_compat_base_url and settings.openai_compat_model:
             providers.append(OpenAICompatProvider(settings.openai_compat_base_url, settings.openai_compat_api_key,
-                                                  settings.openai_compat_model))
+                                                  settings.openai_compat_model, settings.llm_connect_timeout_seconds))
         elif name == "mock":
             providers.append(MockProvider())
     return ResilientLLM(providers, settings)

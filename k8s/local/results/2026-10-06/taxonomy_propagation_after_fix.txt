@@ -1,0 +1,2 @@
+added intent propagation_check_fcb1f6 through backend-68dfd575c5-9rh2g: HTTP 201
+backend-68dfd575c5-db52k sees the change after 8.2 s: A=(3, 11) B=(3, 11) (before: A=(2, 10) B=(2, 10))

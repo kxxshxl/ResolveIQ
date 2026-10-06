@@ -30,6 +30,24 @@ def cleanup(svc, run):
     run(svc.repo.bump_corpus_version)
 
 
+# ---------------------------------------------------------------- several replicas
+def test_taxonomy_change_made_by_another_replica_is_picked_up(svc, run, cleanup):
+    """Each process caches the taxonomy; a class added through one replica must reach the others without a restart."""
+    from app.classification.taxonomy import TaxonomyService
+
+    other = TaxonomyService(svc.repo, svc.embedder)  # a second replica's (or the worker's) view of the same database
+    run(other.refresh)
+    assert run(other.sync_if_changed) is False  # nothing changed: no reload
+    label = f"sync_{uuid.uuid4().hex[:6]}"
+    cleanup["labels"].append(label)
+    run(svc.taxonomy.add_label, "intent", label, "Throw-away class used to test taxonomy propagation.", ["syncy"], ["sync example complaint"])
+    assert not other.current.has("intent", label)
+    assert run(other.sync_if_changed) is True
+    assert other.current.has("intent", label) and other.current.version == svc.taxonomy.current.version
+    assert label in other.current.prototypes["intent"]  # usable zero-shot straight away
+    assert run(other.sync_if_changed) is False
+
+
 # ---------------------------------------------------------------- single ticket
 def test_new_ticket_is_searchable_immediately_without_restart(client, cleanup):
     tid = f"TKT-T{uuid.uuid4().hex[:6]}"

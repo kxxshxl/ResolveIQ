@@ -171,8 +171,33 @@ and costs about 7-9% of throughput in this pipeline (14.9 vs 16.0 req/s at 1 use
   confirmed good resolutions through the normal ingestion endpoint (they become new evidence immediately), (3) use
   corrected intents as extra labelled examples / evaluation data, (4) track abstention-rate and citation-failure drift.
 
-## 4. Kubernetes (manifests shipped in `k8s/`, validated but not applied to a live cluster; see `DEPLOYMENT.md`)
+## 4. Kubernetes (manifests in `k8s/base/`, applied and tested on a local kind cluster; full report in [`kubernetes.md`](kubernetes.md))
 
 `backend` Deployment (N replicas, HPA) → Service → Ingress (TLS, auth, rate limit) · `worker` Deployment (`k8s/worker.yaml`:
 same image, `python -m app.worker`, own NetworkPolicy, 120 s termination grace for in-flight jobs) · managed Postgres (+ PgBouncer, read replica) · managed Redis · `llm` Deployment on GPU nodes (vLLM) ·
 `embedder` Deployment (TEI) · Prometheus Operator + Grafana · migration `Job` per release.
+
+**What was actually run (2026-10-06, kind v0.30 / Kubernetes 1.34, one node on a laptop, `k8s/local/`):** the base manifests plus an overlay
+with in-cluster Postgres/pgvector, Redis and Jaeger; 2 API replicas, 1 worker, 2 frontends, Ingress with ingress-nginx. A real complaint went
+Ingress → frontend → API → Ollama and returned a validated, cited answer; synchronous and worker-executed ingestion worked; `/health`,
+`/health/ready` and the token-protected `/metrics` behaved as designed; traces from the API and the worker reached Jaeger; with the LLM
+unreachable the API kept answering from evidence only (`degraded` / `extractive`, readiness still 200) and recovered afterwards; NetworkPolicies
+were checked by connection attempts; a rolling restart under traffic dropped 0 of 130 / 48 requests after a `preStop` delay was added (2 of
+127 before). 22 automated checks pass (`k8s/local/e2e_test.py`).
+
+**What that does not show:** multi-node behaviour, node failure or drains, a managed database, a GPU/in-cluster LLM, cert-manager and real TLS,
+Prometheus/Grafana in the cluster, autoscaling under load, or backup/restore on Kubernetes. kind's network-policy agent was observed to lag and
+once to fail open under memory pressure, so policy enforcement must be re-verified on a production CNI. Do not read this as a production-grade
+Kubernetes deployment; it is a verified starting point.
+
+**Defects the deployment found and that are fixed** (details and numbers in `kubernetes.md` §5): the seed data was never mounted; start-up
+calls to the Hugging Face Hub hung under default-deny egress (now `HF_HUB_OFFLINE`); the migrate Job was OOM-killed at 2 Gi; FastAPI ≥ 0.142's
+built-in OpenTelemetry switches itself on from `OTEL_EXPORTER_OTLP_ENDPOINT` and would have duplicated spans and exported exception text (now
+disabled); **a taxonomy change on one API replica was invisible to the others and the worker until restart** (now synced every 10 s); an
+unreachable (packet-dropping) LLM cost the full 30 s budget per probe (now `LLM_CONNECT_TIMEOUT_SECONDS`=5: 33 s → 13 s); 502s during rolling
+restarts (now a `preStop` delay); and a wrong release order in the manifests' own comments.
+
+**Recommended cloud configuration** (not tested): managed Postgres + Redis with TLS; secrets from a secret manager (External Secrets / Vault);
+cert-manager + a real host; ≥ 3 nodes across zones; a CNI that enforces NetworkPolicy; a separate GPU pool for the LLM; HPA/KEDA on in-flight
+requests and `resolveiq_job_queue_depth` rather than CPU alone; ServiceMonitors with the metrics bearer token; an OpenTelemetry Collector with
+`OTEL_SAMPLE_RATIO` < 1. Note that `LLM_MAX_CONCURRENCY` is per replica, so N replicas can put N generations on one model server.

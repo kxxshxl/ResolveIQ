@@ -39,6 +39,7 @@ class Services:
     discovery: DiscoveryService
     affect: AffectModel
     models_ready: bool = False
+    _taxonomy_sync: asyncio.Task | None = None
 
     @classmethod
     async def build(cls, settings: Settings, llm: ResilientLLM | None = None) -> "Services":
@@ -64,8 +65,24 @@ class Services:
         svc.models_ready = True
         await taxonomy.refresh()
         await ingestion.refresh_gauges()
+        if settings.taxonomy_sync_seconds > 0:
+            svc._taxonomy_sync = asyncio.create_task(svc._sync_taxonomy_forever(settings.taxonomy_sync_seconds), name="taxonomy-sync")
         return svc
 
+    async def _sync_taxonomy_forever(self, every: float) -> None:
+        while True:
+            await asyncio.sleep(every)
+            try:
+                if await self.taxonomy.sync_if_changed():
+                    log.info("taxonomy changed elsewhere; reloaded", extra={"version": self.taxonomy.current.version})
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001 - a DB blip must not kill the loop; the next tick retries
+                log.warning("taxonomy sync failed", extra={"error": f"{type(exc).__name__}: {exc}"[:200]})
+
     async def close(self) -> None:
+        if self._taxonomy_sync:
+            self._taxonomy_sync.cancel()
+            await asyncio.gather(self._taxonomy_sync, return_exceptions=True)
         await self.cache.close()
         await self.repo.close()

@@ -19,6 +19,7 @@ spec:
           ports: [{containerPort: 9100, name: metrics}]
           envFrom: [{configMapRef: {name: resolveiq-config}}, {secretRef: {name: resolveiq-secrets}}]
           startupProbe: {httpGet: {path: /metrics, port: metrics}, periodSeconds: 5, failureThreshold: 60}
+          readinessProbe: {httpGet: {path: /metrics, port: metrics}, periodSeconds: 15, timeoutSeconds: 5, failureThreshold: 3}
           livenessProbe: {httpGet: {path: /metrics, port: metrics}, periodSeconds: 30, timeoutSeconds: 5, failureThreshold: 3}
           securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
           resources: {requests: {cpu: "1", memory: 3Gi}, limits: {memory: 5Gi}}

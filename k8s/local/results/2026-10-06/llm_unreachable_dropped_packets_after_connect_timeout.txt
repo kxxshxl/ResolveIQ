@@ -1,0 +1,9 @@
+request 1: HTTP 200 status=degraded generator=extractive in 13.5 s
+request 2: HTTP 200 status=degraded generator=extractive in 2.7 s
+request 3: HTTP 200 status=degraded generator=extractive in 2.6 s
+request 4: HTTP 200 status=degraded generator=extractive in 2.8 s
+request 5: HTTP 200 status=degraded generator=extractive in 2.7 s
+request 6: HTTP 200 status=degraded generator=extractive in 2.7 s
+request 7: HTTP 200 status=degraded generator=extractive in 2.7 s
+request 8: HTTP 200 status=degraded generator=extractive in 13.4 s
+all answers were evidence-only (degraded/extractive) with HTTP 200: True

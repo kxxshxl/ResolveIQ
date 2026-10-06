@@ -29,6 +29,26 @@ crashing job can never take interactive traffic down. The queue is Postgres itse
 fewer system to run at this scale; swapping to SQS/Redis Streams later only touches `Repository.claim_job/complete_job/fail_job`.
 `JOB_EXECUTION=inline` runs the same handlers inside the API process for single-process development and tests.
 
+## 0b. Kubernetes topology (as deployed and tested on kind; see [`kubernetes.md`](kubernetes.md))
+
+```mermaid
+flowchart LR
+    U["Browser"] -->|"HTTPS"| IN["Ingress<br/>(TLS)"] --> FE["frontend Service<br/>2 x nginx"] -->|"/api/"| BE["backend Service<br/>N x API pod<br/>HPA"]
+    BE --> PG[("Postgres + pgvector<br/>StatefulSet + PVC<br/>(managed in the cloud)")]
+    BE --> RD[("Redis")]
+    BE --> LLM["LLM server<br/>(outside the cluster)"]
+    WK["worker Deployment"] --> PG
+    MG["migrate/seed Job"] --> PG
+    BE -. "OTLP" .-> TR["Jaeger / collector"]
+```
+
+One image, three roles (API, worker, migrate Job). Configuration is a ConfigMap plus a Secret consumed with `envFrom`; the namespace enforces the
+`restricted` pod-security level; a default-deny NetworkPolicy set opens only frontend → backend, backend/worker/migrate → Postgres, Redis, the LLM
+port and OTLP, and Prometheus → `/metrics`. Because the API is replicated, **every in-process cache must be safe across replicas**: the response cache
+and rate limiter live in Redis, the corpus is versioned in Postgres, and the taxonomy (cached with its prototype embeddings in each process) is
+re-read when `taxonomy_versions` moves (`TAXONOMY_SYNC_SECONDS`, default 10 s). Before that sync existed, a class accepted on one replica was invisible
+to the others until they restarted; the Kubernetes test found it. `LLM_MAX_CONCURRENCY` is likewise a per-replica limit.
+
 ## 1. Request path: `POST /api/v1/resolve`
 
 ```mermaid

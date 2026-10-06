@@ -1,0 +1,12 @@
+rolling restart took 22 s; 112 requests total, 88 during the rollout
+non-200 responses: 32 [429]; latency of successful requests: P50 24 ms, P95 108 ms, max 377 ms
+  failed at +15.2 s: HTTP 429 after 19 ms
+  failed at +15.5 s: HTTP 429 after 19 ms
+  failed at +15.7 s: HTTP 429 after 22 ms
+  failed at +16.0 s: HTTP 429 after 6 ms
+  failed at +16.2 s: HTTP 429 after 23 ms
+  failed at +16.5 s: HTTP 429 after 26 ms
+  failed at +16.7 s: HTTP 429 after 11 ms
+  failed at +17.0 s: HTTP 429 after 15 ms
+  failed at +17.2 s: HTTP 429 after 19 ms
+  failed at +17.5 s: HTTP 429 after 18 ms

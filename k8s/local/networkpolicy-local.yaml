@@ -1,0 +1,31 @@
+# The base policies deny everything by default and open only the API/worker/frontend paths. The in-cluster data stores and the
+# trace viewer added for the local cluster need their own ingress rules (a managed Postgres/Redis would sit outside the cluster).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: allow-postgres, namespace: resolveiq}
+spec:
+  podSelector: {matchLabels: {app: postgres}}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from: [{podSelector: {matchLabels: {app: backend}}}, {podSelector: {matchLabels: {app: worker}}}, {podSelector: {matchLabels: {app: migrate}}}]
+      ports: [{port: 5432}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: allow-redis, namespace: resolveiq}
+spec:
+  podSelector: {matchLabels: {app: redis}}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from: [{podSelector: {matchLabels: {app: backend}}}, {podSelector: {matchLabels: {app: worker}}}, {podSelector: {matchLabels: {app: migrate}}}]
+      ports: [{port: 6379}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: allow-jaeger, namespace: resolveiq}
+spec:
+  podSelector: {matchLabels: {app: jaeger}}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from: [{podSelector: {matchLabels: {app: backend}}}, {podSelector: {matchLabels: {app: worker}}}]
+      ports: [{port: 4318}]

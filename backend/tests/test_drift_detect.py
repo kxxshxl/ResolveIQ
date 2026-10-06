@@ -10,7 +10,7 @@ import numpy as np
 import pytest
 
 from app.drift import stats
-from app.drift.detect import DriftConfig, Window, analyze, holm, sample_for_embedding
+from app.drift.detect import DriftConfig, Window, _cluster_weights, analyze, holm, sample_for_embedding
 
 D, TOPICS = 32, 6
 _rng0 = np.random.default_rng(0)
@@ -146,6 +146,26 @@ def test_emerging_cluster_is_found_and_described():
     assert c["size"] >= 15 and c["kind"] == "new_topic" and c["covered_by_corpus"] is False and c["p_value"] <= CFG.alpha
     assert all(i.startswith("rn") for i in c["request_ids"][:5]) and c["examples"] and c["mean_evidence"] < 0.6
     assert any(a["signal"] == "emerging_cluster" and a["cluster_id"] == c["cluster_id"] for a in r["alerts"])
+
+
+def test_cluster_weights_sum_to_one_and_lean_towards_unexplained_clusters():
+    w = _cluster_weights([True, False, False, False], 0.75)
+    assert sum(w) == pytest.approx(1.0) and w[0] == pytest.approx(0.75) and w[1] == pytest.approx(0.25 / 3)
+    assert _cluster_weights([True, True], 0.75) == [0.5, 0.5] and _cluster_weights([False] * 4, 0.75) == [0.25] * 4
+    assert _cluster_weights([True, False, False], 0.0) == pytest.approx([1 / 3] * 3)   # 0 = the plain Bonferroni split
+
+
+def test_weighting_finds_a_small_unexplained_topic_that_the_equal_split_misses():
+    """4 new-topic complaints among 100: their exact p-value (about 0.004) is significant at 1% alone but not after an equal split over the ~7
+    clusters tested. Leaning the budget towards the cluster the corpus does not explain finds it; nothing else changes."""
+    from dataclasses import replace
+    found = {0.0: 0, 0.75: 0}
+    for seed in range(5):
+        for share in found:
+            rng = np.random.default_rng(100 + seed)
+            r = analyze(window(100, rng, new_topic=4, tag="r"), window(300, rng, tag="b"), replace(CFG, unexplained_weight=share))
+            found[share] += any(c["significant"] and c["kind"] == "new_topic" for c in r["emerging_clusters"])
+    assert found == {0.0: 0, 0.75: 5}
 
 
 def test_a_surge_of_a_known_topic_is_labelled_a_surge_not_a_new_topic():

@@ -6,7 +6,6 @@ base, or an embedding/model regression (labelled evals only run in CI, so this i
 """
 from __future__ import annotations
 
-import math
 from collections import Counter
 from dataclasses import dataclass
 

@@ -1,5 +1,4 @@
 """API-level tests against the real FastAPI app + Postgres/pgvector (test database) + real embedding/reranker models."""
-import re
 import uuid
 
 import pytest

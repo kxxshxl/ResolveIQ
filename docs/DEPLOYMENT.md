@@ -8,9 +8,9 @@ Two supported targets, both verified artefacts in this repository:
 | **Kubernetes** | HA, autoscaling, managed Postgres/Redis | `k8s/base/` (cloud), `k8s/local/` (kind; tested, see [kubernetes.md](kubernetes.md)) |
 
 What was actually exercised (on Docker Desktop, Windows 11): the full production Compose stack (2 backend replicas, TLS proxy,
-Prometheus scraping both replicas with a bearer token, Grafana), `deploy/smoke_test.py` (12/12 checks), backup + restore, the
+Prometheus scraping both replicas with a bearer token, Grafana), `deploy/smoke_test.py` (all 11 checks; earlier versions of this page said 12/12, a miscount; re-run on the current code on 2026-10-07 with 2 API replicas, a worker and a real LLM answer through the TLS proxy), backup + restore, the
 fail-fast insecure-config check, and the read-only / non-root / cap-dropped containers. The Kubernetes manifests were also applied to a
-single-node kind cluster and exercised end to end (22 checks, see [kubernetes.md](kubernetes.md)); that is a local cluster, not a managed one. That run used the code of commit `2d32e72`; later changes were not redeployed to the cluster (see kubernetes.md).
+single-node kind cluster and exercised end to end (22 checks, see [kubernetes.md](kubernetes.md)); that is a local cluster, not a managed one. The first run used commit `b57fe0c`; the current code was redeployed and the end-to-end checks re-run on 2026-10-07 (22 of 22, and 16 of 16 with the LLM down; see kubernetes.md).
 
 ## 1. Single-host deployment (Docker Compose)
 

@@ -45,7 +45,7 @@ def main(models: list[str]) -> None:
         except Exception as exc:  # noqa: BLE001
             print(f"{name:<52} FAILED to load: {str(exc)[:60]}")
             continue
-        enc = lambda xs: m.encode(xs, normalize_embeddings=True, batch_size=64, show_progress_bar=False)  # noqa: E731
+        enc = lambda xs: m.encode(xs, normalize_embeddings=True, batch_size=64, show_progress_bar=False)  # noqa: E731,B023  (used within this iteration only)
         T = enc([t["complaint_text"] for t in tickets])
         A = enc([a["title"] + ". " + a["content"] for a in articles])
         for split, rows in (("val", [q for q in queries if q["split"] == "val"]), ("test", [q for q in queries if q["split"] == "test"]),

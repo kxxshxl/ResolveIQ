@@ -46,14 +46,14 @@ function Alerts({ alerts }: { alerts: DriftAlert[] }) {
   );
 }
 
-function Compare({ dim }: { dim: DriftDimension }) {
+function Compare({ dim, psiGate }: { dim: DriftDimension; psiGate: number }) {
   const rows = dim.categories.filter((c) => c.baseline_n + c.recent_n > 0).slice(0, 12);
   const max = Math.max(0.01, ...rows.flatMap((c) => [c.baseline_share, c.recent_share]));
   return (
     <>
       <p className="small">
         <span className={`pill ${dim.drifted ? "bad" : "ok"}`}>{dim.drifted ? "shifted" : "stable"}</span>{" "}
-        <span className="muted">PSI {dim.psi.toFixed(2)} (below 0.10 is stable) · {pv(dim.p_value)} after correcting for the number of categories</span>
+        <span className="muted">PSI {dim.psi.toFixed(2)} (an alert needs at least {psiGate.toFixed(2)} and significance) · {pv(dim.p_value)} after correcting for the number of categories</span>
       </p>
       <table className="cmp" aria-label="Baseline and recent share per category">
         <thead><tr><th>Category</th><th>Baseline</th><th>Recent</th><th>Change</th></tr></thead>
@@ -223,7 +223,7 @@ function DriftAnalysis() {
               </button>
             ))}
           </div>
-          {report.distributions[dim] && <Compare dim={report.distributions[dim]} />}
+          {report.distributions[dim] && <Compare dim={report.distributions[dim]} psiGate={report.thresholds?.psi_threshold ?? 0.1} />}
           <div className="stats">
             {report.quality && (
               <>
@@ -237,7 +237,7 @@ function DriftAnalysis() {
               <>
                 <div className="stat" title="Cosine distance between the average complaint embedding of each window."><span className="muted small">Embedding shift</span>
                   <strong>{(report.embedding.centroid_distance ?? 0).toFixed(3)}</strong></div>
-                <div className="stat" title="Share of recent complaints farther from every baseline complaint than 95% of baseline complaints are from each other (5% expected)."><span className="muted small">Unlike baseline</span>
+                <div className="stat" title={`Share of recent complaints farther from every baseline complaint than most baseline complaints are from each other (${pct(report.embedding.unseen_expected_rate ?? 0.05)} expected).`}><span className="muted small">Unlike baseline</span>
                   <strong>{pct(report.embedding.unseen_rate ?? 0)}</strong></div>
               </>
             )}
@@ -248,9 +248,9 @@ function DriftAnalysis() {
 
       {report && !none && (
         <>
-          <h2 className="section-title">Emerging categories</h2>
+          <h2 className="section-title">Emerging topics</h2>
           {clusters.length === 0 && (
-            <section className="card empty"><strong>No emerging groups.</strong><p className="muted small">No group of recent complaints stands out from the baseline.</p></section>
+            <section className="card empty"><strong>No emerging topics.</strong><p className="muted small">No group of recent complaints stands out from the baseline.</p></section>
           )}
           {clusters.map((c) => <ClusterCard key={c.cluster_id} c={c} discovery={report.discovery} />)}
           {report.discovery?.recommended && <p className="muted small">Discovery: {report.discovery.reason}</p>}

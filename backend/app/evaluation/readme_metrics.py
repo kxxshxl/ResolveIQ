@@ -8,7 +8,6 @@ file or key renders as "not measured" and never as a made-up number. Nothing her
 """
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 from app.core.config import REPO_ROOT
@@ -83,6 +82,8 @@ def retrieval(res: dict, detail: bool) -> list[str]:
         for i, s in enumerate(order):
             rows.append([STRATEGY_NAMES[s]] + [_bold_best(cols[k], i, f(cols[k][i])) for k in cols] + [ms(g(block, s, "latency", "p50_ms")), ms(g(block, s, "latency", "p95_ms"))])
         out += table(["strategy", "Hit@1", "Hit@5", "MRR", "nDCG@10", "p50", "p95"], rows)
+    out += ["Quality columns are deterministic and reproduce exactly between runs. Latencies are single-process timings on a shared laptop: the p50s are stable, "
+            "but a p95 of a few milliseconds moves several-fold between runs with whatever else the machine is doing, so compare strategies by p50.", ""]
     art = g(ad, "gold", "article")
     if detail and art:
         out.append(f"**KB articles, hand-written gold** (n={g(art, 'dense', 'n')})")
@@ -162,7 +163,10 @@ def rag(res: dict) -> list[str]:
         out += [f"**End to end** ({i.get('n')} in-domain + {o.get('n')} out-of-domain complaints through the full pipeline):", ""]
         out += table(["metric", "value"], [["resolved", pc(i.get("successful_resolution_rate"))], ["resolved with a source from the right scenario", pc(i.get("correct_resolution_rate"))],
                                            ["false abstention (in-domain)", pc(i.get("false_abstention_rate"), 1)], ["out-of-domain complaints abstained", pc(o.get("correct_abstention_rate"))],
-                                           ["pipeline errors", str(g(e, "failures", "pipeline_errors"))], ["latency p50 / p95 (LLM generation dominates)", f"{ms(lat.get('p50_ms'))} / {ms(lat.get('p95_ms'))}"]])
+                                           ["pipeline errors", str(g(e, "failures", "pipeline_errors"))], ["latency p50 / p95 (LLM generation dominates)", f"{ms(lat.get('p50_ms'))} / {ms(lat.get('p95_ms'))}"]]
+                     + ([[f"LLM tokens per generated answer, prompt / completion (mean; p95), {tk['n']} answers",
+                          f"{tk['prompt']['mean']:,.0f} / {tk['completion']['mean']:,.0f} ({tk['prompt']['p95']:,.0f} / {tk['completion']['p95']:,.0f})"]]
+                        if (tk := e.get("tokens")) and tk.get("prompt") and tk.get("completion") else []))
     return out or ["Generation and end-to-end: not measured in the recorded run.", ""]
 
 
@@ -211,12 +215,22 @@ def drift(res: dict, detail: bool) -> list[str]:
     sc = d.get("scenarios", {})
     out = [f"**Drift detection** (injection demo, {g(d, 'meta', 'trials_per_scenario')} trials per scenario, no database, deterministic seeds; `python -m app.evaluation.drift_demo`):", ""]
     rows = [[f"no change, {c['n_baseline']} / {c['n_recent']} requests", f"{c['false_alarms']} of {c['trials']} reports", f"{pc(c['false_alarm_rate'], 1)} (95% {pc(c['ci95'][0], 1)} to {pc(c['ci95'][1], 1)})"] for c in ctrl]
-    keys = ["intent_shift_25", "intent_shift_33", "intent_shift_40", "severity_shift_40", "severity_shift_55", "new_topic_4", "new_topic_6", "new_topic_10", "new_topics_3x8", "vocabulary_shift", "stale_knowledge_base"]
-    for k in keys if detail else ["intent_shift_33", "intent_shift_40", "new_topic_6", "new_topic_10", "vocabulary_shift"]:
+    keys = ["intent_shift_25", "intent_shift_33", "intent_shift_40", "severity_shift_40", "severity_shift_55", "new_topic_4", "new_topic_6", "new_topic_10", "new_topics_3x8",
+            "known_intent_returns_10", "vocabulary_shift", "stale_knowledge_base"]
+    for k in keys if detail else ["intent_shift_33", "intent_shift_40", "new_topic_6", "new_topic_10", "new_topics_3x8", "vocabulary_shift"]:
         v = sc.get(k)
         if v:
             rows.append([v["description"], f"{v['detected']} of {v['trials']} reports", f"{pc(v['detection_rate'])} (95% {pc(v['ci95'][0])} to {pc(v['ci95'][1])})"])
     out += table(["scenario", "alerts", "rate"], rows)
+    st = d.get("small_topics")
+    if st and st.get("no_change"):
+        rows = [[f"{v['injected']} of 100 complaints are a new topic", f"{v['drift_alarm']} of {v['trials']}", f"{v['discovery_proposal']} of {v['trials']} ({pc(v['discovery_ci95'][0])} to {pc(v['discovery_ci95'][1])})",
+                 f"{v['other_proposals_per_window']}"] for k, v in st.items() if k.startswith("new_topic")]
+        nc = st["no_change"]
+        rows.append(["nothing changed", "-", "-", f"{nc['proposals_per_window']}"])
+        out += ["**Small new topics: alarm versus review queue** (same windows). A pure cluster of 4 recent complaints cannot reach p < 1% at this window size, so the alarm, "
+                "with its 1% false-alarm budget, cannot certify it; discovery has no alarm budget and puts a proposal in front of a person instead, at the cost of review load:", ""]
+        out += table(["scenario", "drift alarm", "discovery proposal for the topic (95%)", "other proposals per window"], rows)
     return out
 
 
@@ -244,8 +258,9 @@ def load(res: dict, detail: bool) -> list[str]:
         return ["**Load test:** no summary is recorded (`loadtest/results/latest_summary.json`).", ""]
     names = {"no_llm": "no LLM (evidence-only mode)", "llm": "full pipeline, local LLM", "llm_down": "LLM unreachable"}
     rows = [[names.get(r["scenario"], r["scenario"]), str(r["users"]), f"{r['rps']}", ms(r.get("p50")), ms(r.get("p95")), ms(r.get("p99")), str(r.get("errors")), str(r.get("evidence_only", "n/a"))] for r in l.get("rows", [])]
-    dirty = " (the working tree had uncommitted changes outside the request path)" if l.get("dirty") else ""
-    return [f"**Load test** (suite `{l.get('suite')}`, commit `{l.get('commit')}`{dirty}): {l.get('description')}", ""] + table(
+    dirty = "; the working tree had uncommitted changes outside the request path" if l.get("dirty") else ""
+    rec = f", recorded as `{l['commit_recorded']}` before the history was rewritten" if l.get("commit_recorded") else ""
+    return [f"**Load test** (suite `{l.get('suite')}`, commit `{l.get('commit')}`{rec}{dirty}; the request path has not changed since): {l.get('description')}", ""] + table(
         ["scenario", "users", "OK req/s", "p50", "p95", "p99", "errors", "answered from evidence only"], rows) + [l.get("caveat", ""), ""]
 
 
@@ -299,8 +314,11 @@ def headline(res: dict) -> list[str]:
         out.append(f"* **Adaptive retrieval matches dense retrieval, it does not beat it** (MRR difference {d:+.3f} on gold tickets, interval includes zero on every held-out split). It is shipped as a bounded, observable option.")
     if ctrl and ds.get("intent_shift_40") and ds.get("new_topic_10"):
         i40, n10, n4, n6 = ds["intent_shift_40"], ds["new_topic_10"], ds.get("new_topic_4", {}), ds.get("new_topic_6", {})
+        st4, st6 = g(res, "drift_demo", "small_topics", "new_topic_4", default={}), g(res, "drift_demo", "small_topics", "new_topic_6", default={})
+        small = (f"; for 4 and 6 complaints, below what a 1% alarm can certify, discovery puts a proposal for the topic in front of a reviewer in {st4['discovery_proposal']} and {st6['discovery_proposal']} of {st6['trials']}"
+                 if st4 and st6 else "")
         out.append(f"* **Drift detection** (injection demo): {pc(ctrl[0]['false_alarm_rate'], 1)} false alarms with no change; \"{i40['description']}\" found in {i40['detected']} of {i40['trials']} trials; "
-                   f"a new topic with 10 of 100 recent complaints in {n10['detected']} of {n10['trials']}, with 4 and 6 complaints in {n4.get('detected')} and {n6.get('detected')} of {n4.get('trials')} (the blind spot is stated in the doc).")
+                   f"a new topic with 10 of 100 recent complaints in {n10['detected']} of {n10['trials']}, with 4 and 6 complaints in {n4.get('detected')} and {n6.get('detected')} of {n4.get('trials')}{small} (limits in docs/drift.md).")
     e = sc.get("search", {}).get("ef_search=100")
     if e:
         out.append(f"* **Database:** 100,000 synthetic 384-d vectors, HNSW: recall@10 {f(e['recall@10'], 3)}, p99 {e['p99_ms']} ms, {sc['storage']['total_mb']:.0f} MB; batched ingestion {g(res, 'ingest_benchmark', 'speedup')}x faster than per-row transactions.")

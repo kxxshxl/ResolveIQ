@@ -18,7 +18,7 @@
       "abstain_below": 0.4908,
       "novelty_threshold": 0.6306
     },
-    "elapsed_s": 21.0
+    "elapsed_s": 21.9
   },
   "config": {
     "min_requests": 30,
@@ -33,6 +33,7 @@
     "min_embedded": 30,
     "permutations": 500,
     "novelty_threshold": 0.630598783493042,
+    "unexplained_weight": 0.75,
     "cluster_distance_threshold": 0.65,
     "cluster_min_size": 4
   },
@@ -188,17 +189,18 @@
       "n_baseline": 300,
       "n_recent": 100,
       "trials": 30,
-      "detected": 0,
-      "detection_rate": 0.0,
+      "detected": 2,
+      "detection_rate": 0.0667,
       "ci95": [
-        0.0,
-        0.1135
+        0.0185,
+        0.2132
       ],
       "signals_fired": {
+        "emerging_cluster": 2,
         "intent_distribution": 1,
         "product_distribution": 1
       },
-      "topics_recovered_per_report": 0.0,
+      "topics_recovered_per_report": 0.067,
       "unmatched_significant_clusters_per_report": 0.0
     },
     "new_topic_10": {
@@ -206,19 +208,19 @@
       "n_baseline": 300,
       "n_recent": 100,
       "trials": 30,
-      "detected": 19,
-      "detection_rate": 0.6333,
+      "detected": 20,
+      "detection_rate": 0.6667,
       "ci95": [
-        0.4551,
-        0.7813
+        0.4878,
+        0.8077
       ],
       "signals_fired": {
-        "emerging_cluster": 19,
+        "emerging_cluster": 20,
         "intent_distribution": 1,
         "evidence_confidence": 1,
         "product_distribution": 1
       },
-      "topics_recovered_per_report": 0.633,
+      "topics_recovered_per_report": 0.667,
       "unmatched_significant_clusters_per_report": 0.0
     },
     "new_topics_3x8": {
@@ -226,17 +228,37 @@
       "n_baseline": 300,
       "n_recent": 100,
       "trials": 30,
-      "detected": 15,
-      "detection_rate": 0.5,
+      "detected": 17,
+      "detection_rate": 0.5667,
       "ci95": [
-        0.3315,
-        0.6685
+        0.392,
+        0.7262
       ],
       "signals_fired": {
-        "emerging_cluster": 15,
+        "emerging_cluster": 17,
         "evidence_confidence": 2
       },
-      "topics_recovered_per_report": 0.7,
+      "topics_recovered_per_report": 0.867,
+      "unmatched_significant_clusters_per_report": 0.0
+    },
+    "known_intent_returns_10": {
+      "description": "a known intent, absent from the baseline, returns with 10 of 100 complaints (held-out check of the weighting; detected = cluster or intent-mix alert)",
+      "n_baseline": 300,
+      "n_recent": 100,
+      "trials": 30,
+      "detected": 30,
+      "detection_rate": 1.0,
+      "ci95": [
+        0.8865,
+        1.0
+      ],
+      "signals_fired": {
+        "intent_distribution": 30,
+        "emerging_cluster": 3,
+        "product_distribution": 3
+      },
+      "correct_attribution": 30,
+      "topics_recovered_per_report": 0.1,
       "unmatched_significant_clusters_per_report": 0.0
     },
     "vocabulary_shift": {
@@ -252,7 +274,7 @@
       ],
       "signals_fired": {
         "evidence_confidence": 19,
-        "emerging_cluster": 18,
+        "emerging_cluster": 19,
         "abstention_rate": 16,
         "embedding_centroid": 13
       }
@@ -272,6 +294,35 @@
         "evidence_confidence": 2,
         "abstention_rate": 1
       }
+    }
+  },
+  "small_topics": {
+    "new_topic_4": {
+      "injected": 4,
+      "trials": 30,
+      "drift_alarm": 0,
+      "discovery_proposal": 4,
+      "discovery_ci95": [
+        0.0531,
+        0.2968
+      ],
+      "other_proposals_per_window": 0.6
+    },
+    "new_topic_6": {
+      "injected": 6,
+      "trials": 30,
+      "drift_alarm": 2,
+      "discovery_proposal": 13,
+      "discovery_ci95": [
+        0.2738,
+        0.608
+      ],
+      "other_proposals_per_window": 0.63
+    },
+    "no_change": {
+      "trials": 30,
+      "proposals_per_window": 0.57,
+      "windows_with_a_proposal": 16
     }
   },
   "examples": {
@@ -331,9 +382,12 @@
     },
     "new_topic_6": {
       "description": "6 of 100 (6%) are a new topic",
-      "trial": null,
-      "status": "not detected in any trial",
-      "alerts": []
+      "trial": 6,
+      "seed": 1005,
+      "status": "alert",
+      "alerts": [
+        "6 recent complaints form a new topic (voicemail, mailbox, reset, message): almost nothing like it appears in the baseline; no existing evidence explains it (p=0.007)"
+      ]
     },
     "new_topic_10": {
       "description": "10 of 100 (10%) are a new topic",
@@ -351,7 +405,7 @@
       "status": "alert",
       "alerts": [
         "evidence confidence fell (KS D=0.29, p=2.4e-04): mean 0.64 to 0.58, 10th percentile 0.54 to 0.48. Retrieval regression, stale knowledge base or vocabulary shift",
-        "8 recent complaints form a new topic (old, number, porting, transferred): almost nothing like it appears in the baseline; no existing evidence explains it (p=0.004)"
+        "8 recent complaints form a new topic (old, number, porting, transferred): almost nothing like it appears in the baseline; no existing evidence explains it (p=0.003)"
       ],
       "discovery_link": {
         "proposals_built": 1,
@@ -377,6 +431,16 @@
           }
         ]
       }
+    },
+    "known_intent_returns_10": {
+      "description": "a known intent, absent from the baseline, returns with 10 of 100 complaints (held-out check of the weighting; detected = cluster or intent-mix alert)",
+      "trial": 1,
+      "seed": 1000,
+      "status": "alert",
+      "alerts": [
+        "intent mix shifted (p=3.2e-06, PSI 0.60): service_outage 0% to 10%, plan_change 8% to 1%, device_issue 19% to 14%",
+        "6 recent complaints form a new topic (road, neighbours, residents reporting, connectivity district-wide): almost nothing like it appears in the baseline; no existing evidence explains it (p=0.006)"
+      ]
     },
     "vocabulary_shift": {
       "description": "every recent complaint arrives in chat-widget style (abbreviated, lower case)",

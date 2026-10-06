@@ -1,0 +1,9 @@
+# Lint for bug classes, not style: pyflakes (undefined names, unused imports, redefinitions), syntax errors, and flake8-bugbear.
+# Ignored: B008 (FastAPI's `Depends(...)` in argument defaults is the framework's idiom) and B905 (`zip(strict=)`: the zipped
+# sequences are built from the same rows throughout; adding strict= everywhere is churn without a defect behind it).
+target-version = "py311"
+line-length = 200
+
+[lint]
+select = ["F", "E9", "B"]
+ignore = ["B008", "B905"]

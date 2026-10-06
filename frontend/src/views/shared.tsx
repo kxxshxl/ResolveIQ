@@ -119,5 +119,5 @@ export function SourceList({ sources, selected, onSelect, citedBy }: { sources: 
 }
 
 export const statusTone = (s: string): Tone => (s === "resolved" ? "ok" : s === "degraded" ? "warn" : "bad");
-export const statusText: Record<string, string> = { resolved: "Grounded resolution", degraded: "Evidence only (LLM unavailable)", unreliable: "Unreliable: grounding checks failed", abstained: "Abstained: not enough evidence" };
+export const statusText: Record<string, string> = { resolved: "Grounded resolution", degraded: "Evidence only (LLM unavailable or busy)", unreliable: "Unreliable: grounding checks failed", abstained: "Abstained: not enough evidence" };
 export { pct };

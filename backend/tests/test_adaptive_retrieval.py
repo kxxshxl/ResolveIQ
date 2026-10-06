@@ -4,7 +4,7 @@ import pytest
 
 from app.models.schemas import RetrievedItem
 from app.retrieval.fusion import mmr_order
-from app.retrieval.service import QueryContext, RetrievalService
+from app.retrieval.service import RetrievalService
 
 Q = "My broadband keeps dropping around 8 PM each day and I've restarted the router twice already."
 

@@ -136,6 +136,7 @@ class Settings(BaseSettings):
     drift_embedding_shift: float = 0.02
     drift_unseen_quantile: float = 0.05         # descriptive: share of recent complaints farther from the baseline than this quantile of baseline-to-baseline distances
     drift_cluster_distance: float = 0.65        # average-linkage cosine distance for grouping recent+baseline complaints into candidate new-topic clusters (looser than discovery's 0.55: see docs/drift.md)
+    drift_unexplained_weight: float = 0.75      # share of the new-topic test budget for clusters the corpus does not explain (weighted Bonferroni; 0 = equal split; docs/drift.md 3.3)
     drift_max_embed_recent: int = 500           # distinct complaints embedded per window (evenly thinned above this)
     drift_max_embed_baseline: int = 1000
     drift_permutations: int = 500

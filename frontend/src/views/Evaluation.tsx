@@ -131,6 +131,12 @@ function Drift({ r, f }: { r: Rec; f?: { path: string; written: string } }) {
       <div className="kpis">{c.map((x: Rec) => <Stat key={x.n_baseline + String(x.distinct_complaints)} name={`False alarms, nothing changed${x.distinct_complaints ? " (distinct)" : ""}`} value={`${x.false_alarms}/${x.trials}`} hint={`95% interval ${pct(x.ci95[0])} to ${pct(x.ci95[1])}`} tone={x.false_alarm_rate <= 0.02 ? "ok" : "warn"} />)}</div>
       <div className="tbl-wrap"><table className="tbl"><thead><tr><th>Injected change</th><th className="num">Detected</th><th>95% interval</th></tr></thead>
         <tbody>{Object.entries<Rec>(d.scenarios).map(([k, v]) => <tr key={k}><td>{v.description}</td><td className="num">{v.detected}/{v.trials}</td><td className="small">{pct(v.ci95[0])} to {pct(v.ci95[1])}</td></tr>)}</tbody></table></div>
+      {d.small_topics && <>
+        <h3>Small new topics: alarm versus review queue</h3>
+        <p className="muted small">A group of 4 to 6 complaints is mostly below what an alarm with a 1% false-alarm budget can certify. Discovery has no alarm budget and puts proposals in front of a person instead; the price is review load.</p>
+        <div className="tbl-wrap"><table className="tbl"><thead><tr><th>Injected</th><th className="num">Drift alarm</th><th className="num">Discovery proposal for it</th><th className="num">Other proposals per window</th></tr></thead>
+          <tbody>{Object.entries<Rec>(d.small_topics).filter(([k]) => k.startsWith("new_topic")).map(([k, v]) => <tr key={k}><td>{v.injected} of 100 complaints are a new topic</td><td className="num">{v.drift_alarm}/{v.trials}</td><td className="num">{v.discovery_proposal}/{v.trials}</td><td className="num">{v.other_proposals_per_window}</td></tr>)}
+            {d.small_topics.no_change && <tr><td>Nothing changed</td><td className="num">–</td><td className="num">–</td><td className="num">{d.small_topics.no_change.proposals_per_window}</td></tr>}</tbody></table></div></>}
       <Source f={f} />
     </Panel>
   );
@@ -144,7 +150,7 @@ function Scale({ r, f }: { r: Rec; f?: { path: string; written: string } }) {
       {s && (
         <>
           <h3>pgvector at {s.setup.vectors.toLocaleString()} synthetic {s.setup.dimensions}-d vectors</h3>
-          <div className="stats"><Stat name="Index build" value={`${s.index_build.seconds} s`} hint={s.index_build.note} /><Stat name="Load" value={`${s.load.seconds} s`} /><Stat name="HNSW index" value={`${s.storage.hnsw_index_mb} MB`} /><Stat name="Table" value={`${s.storage.table_mb} MB`} /><Stat name="8 threads" value={`${s.concurrency.queries_per_second} qps`} hint={`p95 ${s.concurrency.p95_ms} ms`} /></div>
+          <div className="stats"><Stat name="Index build" value={`${s.index_build.seconds} s`} hint={s.index_build.note} /><Stat name="Load" value={`${s.load.seconds} s`} /><Stat name="HNSW index" value={`${s.storage.hnsw_index_mb} MB`} /><Stat name="Table" value={`${s.storage.table_mb} MB`} /><Stat name={`${s.concurrency.client_threads} client threads`} value={`${s.concurrency.queries_per_second} qps`} hint={`p95 ${s.concurrency.p95_ms} ms at ef_search ${s.concurrency.ef_search}`} /></div>
           <div className="tbl-wrap"><table className="tbl"><thead><tr><th>ef_search</th><th className="num">recall@10</th><th className="num">p50</th><th className="num">p95</th><th className="num">p99</th></tr></thead>
             <tbody>{Object.entries<Rec>(s.search).map(([k, v]) => <tr key={k}><td>{k.replace("ef_search=", "")}</td><td className="num">{fixed(v["recall@10"], 3)}</td><td className="num">{ms(v.p50_ms)}</td><td className="num">{ms(v.p95_ms)}</td><td className="num">{ms(v.p99_ms)}</td></tr>)}</tbody></table></div>
           <h3>Filtered search</h3>
@@ -160,13 +166,15 @@ function Scale({ r, f }: { r: Rec; f?: { path: string; written: string } }) {
   );
 }
 
+const LOAD_SCENARIOS: Record<string, string> = { no_llm: "No LLM (evidence only)", llm: "Full pipeline, local LLM", llm_down: "LLM unreachable" };
+
 function Load({ r, f }: { r: Rec; f?: { path: string; written: string } }) {
   const l = r.load_test;
   if (!l) return null;
   return (
     <Panel title="Load test" subtitle={l.description}>
       <div className="tbl-wrap"><table className="tbl"><thead><tr><th>Scenario</th><th className="num">Users</th><th className="num">OK req/s</th><th className="num">P50</th><th className="num">P95</th><th className="num">Errors</th></tr></thead>
-        <tbody>{(l.rows as Rec[]).map((x, i) => <tr key={i}><td>{x.scenario}</td><td className="num">{x.users}</td><td className="num">{x.rps}</td><td className="num">{ms(x.p50)}</td><td className="num">{ms(x.p95)}</td><td className="num">{x.errors}</td></tr>)}</tbody></table></div>
+        <tbody>{(l.rows as Rec[]).map((x, i) => <tr key={i}><td>{LOAD_SCENARIOS[x.scenario] ?? x.scenario}</td><td className="num">{x.users}</td><td className="num">{x.rps}</td><td className="num">{ms(x.p50)}</td><td className="num">{ms(x.p95)}</td><td className="num">{x.errors}</td></tr>)}</tbody></table></div>
       <p className="muted small">{l.caveat}</p><Source f={f} />
     </Panel>
   );

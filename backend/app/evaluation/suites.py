@@ -4,7 +4,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import re
 import time
 from collections import Counter
 from typing import Sequence
@@ -263,10 +262,22 @@ def _e2e_metrics(runs: list[dict], corpus: Corpus) -> dict:
                      "retrieval_failures": sum(1 for r in runs if r["error"] and "retrieval" in r["error"].lower()),
                      "generation_degraded": sum(1 for r in runs if r["resp"] and r["resp"].status == "degraded"),
                      "citation_validation_failures": sum(1 for r in runs if r["resp"] and r["resp"].status == "unreliable")},
-        "tokens": None,
+        "tokens": _token_stats(runs),
         # every in-domain complaint that did not end in a correct resolution, with what the system did instead (evaluation queries are synthetic or hand-written: no customer data)
         "failure_cases": [_failure_case(r, corpus) for r in ind if not correct(r)],
     }
+
+
+def _token_stats(runs: list[dict]) -> dict | None:
+    """Prompt and completion tokens as the LLM provider reported them, over the answers it generated (the input to cost and capacity estimates)."""
+    gen = [s.detail for r in runs if r["resp"] for s in r["resp"].trace if s.name == "generate" and s.detail.get("completion_tokens") is not None]
+    if not gen:
+        return None
+
+    def dist(key: str) -> dict:
+        a = np.asarray([d[key] for d in gen if d.get(key) is not None], dtype=float)
+        return {"mean": round(float(a.mean()), 1), "p50": float(np.percentile(a, 50)), "p95": float(np.percentile(a, 95)), "max": float(a.max())} if len(a) else {}
+    return {"n": len(gen), "prompt": dist("prompt_tokens"), "completion": dist("completion_tokens"), "budget_tokens": gen[0].get("budget_tokens")}
 
 
 def _failure_case(r: dict, corpus: Corpus) -> dict:
@@ -445,7 +456,7 @@ async def adaptive_suite(svc: Services, sets: EvalSets, max_queries: int | None)
             for other in ("dense", "hybrid", "hybrid_reranked"):
                 diffs[f"adaptive_minus_{other}"] = {m: _paired_bootstrap(per_query["adaptive"][m], per_query[other][m]) for m in ("mrr", "hit@1")}
             out["paired_differences"].setdefault(split, {})[kind] = diffs
-            rel = lambda r_, sid: sid in corpus.relevant(kind, r_["scenario_id"])  # noqa: E731
+            rel = lambda r_, sid: sid in corpus.relevant(kind, r_["scenario_id"])  # noqa: E731,B023  (used within this iteration only)
             pairs = list(zip([r for r, _, _ in embedded], tops["adaptive"], tops["dense"]))
             better = [r["qid"] for r, a, d in pairs if rel(r, a) and not rel(r, d)]
             worse = [r["qid"] for r, a, d in pairs if rel(r, d) and not rel(r, a)]

@@ -16,13 +16,13 @@ from dataclasses import dataclass, field
 from app.classification.pipeline import ComplaintClassifier
 from app.classification.taxonomy import TaxonomyService
 from app.core.config import Settings
-from app.core.errors import LLMOverloaded, LLMUnavailable, ResolveIQError
+from app.core.errors import LLMOverloaded, LLMUnavailable
 from app.core.logging import trace_id_var
 from app.core.pii import redact
 from app.core.text import looks_like_injection, normalize_text
 from app.core.version import PIPELINE_VERSION
 from app.db.repository import Repository
-from app.models.schemas import (Classification, EvidenceAssessment, Provenance, ResolveRequest, ResolveResponse, Resolution, RetrievedItem,
+from app.models.schemas import (Classification, Provenance, ResolveRequest, ResolveResponse, Resolution, RetrievedItem,
                                 StageRecord, ValidationReport)
 from app.observability import tracing
 from app.observability.metrics import (ABSTENTIONS, CACHE, EVIDENCE_CONFIDENCE, INJECTION_FLAGS, PII_REDACTIONS,
@@ -31,7 +31,7 @@ from app.rag.citations import validate_resolution
 from app.rag.evidence import assess_evidence, select_evidence
 from app.rag.generator import GenerationError, generate_extractive, generate_with_llm
 from app.rag.lineage import build_lineage
-from app.rag.prompts import PROMPT_HASH, PROMPT_VERSION, SYSTEM_PROMPT, build_prompt, est_tokens
+from app.rag.prompts import PROMPT_HASH, PROMPT_VERSION, build_prompt
 from app.retrieval.service import RetrievalService
 from app.services.cache import Cache
 from app.services.embedding import EmbeddingService

@@ -1,7 +1,6 @@
 """Provenance, stage trace, lineage (the evidence graph), the bounded/versioned prompt, and deterministic generation."""
 import json
 
-import pytest
 
 from app.models.schemas import Classification, Confidence, RetrievedItem
 from app.rag.prompts import PROMPT_HASH, PROMPT_VERSION, SYSTEM_PROMPT, build_prompt, est_tokens

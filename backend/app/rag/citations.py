@@ -5,7 +5,6 @@ Guarantees: (1) the response never carries a citation id that was not actually r
 """
 from __future__ import annotations
 
-import asyncio
 import re
 
 import numpy as np

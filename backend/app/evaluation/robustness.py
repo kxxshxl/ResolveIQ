@@ -17,7 +17,6 @@ import numpy as np
 from app.classification.taxonomy import DIMENSIONS
 from app.evaluation.datasets import EvalSets, build_corpus
 from app.evaluation.metrics import retrieval_metrics
-from app.retrieval.service import QueryContext
 from app.services.container import Services
 
 DISTRACTORS = (

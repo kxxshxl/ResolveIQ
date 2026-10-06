@@ -1,0 +1,25 @@
+pods: 10 (backend-859fc77c45-d89rl, backend-859fc77c45-gqwmp, frontend-776bcd757f-5nlb9, frontend-776bcd757f-r8jfs, jaeger-64f87b946c-dv6qd, postgres-0, redis-797c7656d-mcxbg, resolveiq-migrate-tk6nc, resolveiq-migrate-ttk7r, worker-844f8df945-fhpxx)
+PASS  every running pod is Ready   [[]]
+PASS  frontend serves the single-page app   [200]
+PASS  GET /health through the frontend proxy   [{'status': 'ok'}]
+      readiness: {"database": "ok", "models": "loaded", "redis": "ok", "corpus": {"tickets": 290, "articles": 25, "deprecated_articles": 1, "ticket_embeddings": 290, "kb_embeddings": 26}, "affect_model": "loaded", "jobs": {"mode": "queue"}, "llm": {"ollama": false}, "tracing": "otlp"}
+PASS  GET /health/ready through the frontend: database ok, models loaded, corpus present   [{'status': 'ready', 'checks': {'database': 'ok', 'models': 'loaded', 'redis': 'ok', 'corpus': {'tickets': 290, 'articles': 25, 'deprecated_articles': 1, 'ticket_embeddings': 290, 'kb_embeddings': 26}, 'affect_model': 'loaded', 'jobs': {'mode': 'queue'}, 'llm': {'ollama': False}, 'tracing': 'otlp'}}]
+PASS  Redis reachable from the backend   [ok]
+PASS  readiness still 200 while the LLM is down (a dead LLM must not take pods out of service)   [{'ollama': False}]
+PASS  API requires a key (401 without X-API-Key)   [401]
+PASS  /metrics is not exposed through the frontend (404)   [404]
+PASS  backend /metrics rejects a request without the token (401)   [401]
+PASS  backend /metrics with the token exposes the application metrics   [200]
+PASS  worker /metrics (queue depth, job metrics) reachable   [200]
+      resolve via frontend: HTTP 200 in 3096 ms
+PASS  POST /api/v1/resolve through the frontend (nginx -> backend Service) returns 200
+      status=degraded generator=extractive confidence=0.805 steps=7 citations=2 classification=broadband_disconnection
+      warnings=['LLM unavailable or invalid output (all LLM providers failed: ollama[0]: ConnectError: All connection attempts failed; ollama[1]: ConnectError: All connection attempts failed); returned evidence-only resolution.']
+      server latency_ms={'preprocess': 0.1, 'embed': 9.5, 'retrieve': 3.5, 'classify': 2512.5, 'generate': 555.2, 'total': 3077.3}  request_id=e35a2850-0ae9-4eac-b234-fba0d5f9766d trace_id=00c4ebbdc099ed05d516f30d1297bfe0
+PASS  response carries steps, citations that point at retrieved evidence, and a valid validation report
+PASS  X-Trace-Id response header equals the body's trace_id (and request_id/trace_id are propagated)   [{'x-trace-id': '00c4ebbdc099ed05d516f30d1297bfe0'}]
+PASS  LLM unavailable: answered from evidence only (generator is extractive, status degraded, warning present)   [{'generator': 'extractive', 'status': 'degraded', 'warnings': ['LLM unavailable or invalid output (all LLM providers failed: ollama[0]: ConnectError: All connection attempts failed; ollama[1]: ConnectError: All connection attempts failed); returned evidence-only resolution.']}]
+PASS  out-of-domain request abstains   [{'http': 200, 'status': 'abstained'}]
+      stats: {"corpus": {"tickets": 290, "articles": 25, "deprecated_articles": 1, "ticket_embeddings": 290, "kb_embeddings": 26}, "corpus_version": 50, "taxonomy_version": 3, "embedding_model": "sentence-transformers/all-MiniLM-L6-v2", "reranker": "cross-encoder/ms-marco-MiniLM-L-6-v2", "llm_providers": ["ollam
+
+K8S E2E PASSED

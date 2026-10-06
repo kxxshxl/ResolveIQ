@@ -18,7 +18,6 @@ from pathlib import Path
 from urllib.parse import urlparse, urlunparse
 
 import psycopg
-from psycopg.types.json import Jsonb
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.core.config import REPO_ROOT, get_settings  # noqa: E402

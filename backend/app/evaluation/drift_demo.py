@@ -38,6 +38,7 @@ N_BASELINE, N_RECENT = 300, 100   # default window sizes; the *_large scenarios 
 STALE_INTENTS = ("slow_speed", "plan_change", "service_outage")   # intents whose tickets "disappear" from the corpus in the stale-KB scenario
 BOOST_INTENT = "billing_dispute"
 NOVEL_CLASSES = ("number_porting", "voicemail_issue", "tv_streaming_app")   # the three classes the discovery parameters were never tuned on (10 complaints each)
+RETURNING_INTENTS = ("billing_dispute", "device_issue", "slow_speed", "service_outage")   # known intents for the held-out "returns after an absence" check
 
 _CHAT = {"please": "pls", "because": "cuz", "you": "u", "your": "ur", "thanks": "thx", "thank": "thx", "internet": "net", "connection": "conn",
          "message": "msg", "messages": "msgs", "customer": "cust", "service": "svc", "and": "n", "with": "w", "have": "hv", "been": "bn",
@@ -193,6 +194,16 @@ def scenario_new_topics(per_class: int):
     return build
 
 
+def scenario_known_intent_returns(count: int):
+    """Held-out check of the cluster-test weighting: an intent the corpus DOES explain is absent from the baseline and `count` of its complaints arrive.
+    The weighting leans away from such a cluster, so this scenario shows its cost. No setting was chosen on it."""
+    def build(t, rng, rec, n):
+        target = RETURNING_INTENTS[int(rng.integers(len(RETURNING_INTENTS)))]
+        extra = [{**x, "truth": target} for x in _draw([i for i in rec if i["intent"] == target], count, rng, replace=False)]
+        return _draw([i for i in rec if i["intent"] != target], n - len(extra), rng) + extra, {"targets": [target], "exclude_from_baseline": target}
+    return build
+
+
 def scenario_vocabulary_shift(t, rng, rec, n):
     return [{**i, "vec": i["chat_vec"], "ev": i["chat_ev"], "text": chat_style(i["text"])} for i in _draw(rec, n, rng)], {}
 
@@ -234,6 +245,14 @@ def _detect_topic(rep, meta, win):
     return len(hit) >= 1, {"recovered": len(hit), "spurious": spurious, "clusters": hit}
 
 
+def _detect_returning(rep, meta, win):
+    """Either detector counts: a recovered cluster, or an intent-mix alert whose top mover is the returning intent (correct_attribution)."""
+    hit, d = _detect_topic(rep, meta, win)
+    top = max(rep["distributions"]["intent"]["categories"], key=lambda c: c["delta"])["label"]
+    mix = "intent_distribution" in _signals(rep) and top == meta["targets"][0]
+    return hit or mix, d | {"correct_attribution": mix}
+
+
 def _detect_vocab(rep, meta, win):
     return bool(set(_signals(rep)) & {"embedding_centroid", "evidence_confidence", "emerging_cluster"}), {}
 
@@ -264,6 +283,8 @@ SCENARIOS = [
     Scenario("new_topic_6", "6 of 100 (6%) are a new topic", scenario_new_topic(6), _detect_topic),
     Scenario("new_topic_10", "10 of 100 (10%) are a new topic", scenario_new_topic(10), _detect_topic),
     Scenario("new_topics_3x8", "three new topics at once, 8 complaints each (24% of recent traffic); detected = at least one recovered", scenario_new_topics(8), _detect_topic),
+    Scenario("known_intent_returns_10", "a known intent, absent from the baseline, returns with 10 of 100 complaints (held-out check of the weighting; detected = cluster or intent-mix alert)",
+             scenario_known_intent_returns(10), _detect_returning),
     Scenario("vocabulary_shift", "every recent complaint arrives in chat-widget style (abbreviated, lower case)", scenario_vocabulary_shift, _detect_vocab),
     Scenario("stale_knowledge_base", "tickets for 3 of 9 intents vanish from the evidence corpus", scenario_stale_kb, _detect_stale),
 ]
@@ -274,6 +295,8 @@ def _trial(t: Traffic, seed: int, build, n_baseline: int, n_recent: int, distinc
     a, b = _split(t, rng)
     base_items = _draw(a, n_baseline, rng, replace=not distinct)
     items, meta = build(t, rng, b, n_recent)
+    if meta.get("exclude_from_baseline"):   # drawn separately so every other scenario keeps its random stream (and its recorded numbers)
+        base_items = _draw([i for i in a if i["intent"] != meta["exclude_from_baseline"]], n_baseline, rng, replace=not distinct)
     return _window(f"b{seed}", base_items, t), _window(f"r{seed}", items, t), meta
 
 
@@ -290,9 +313,9 @@ def run_scenario(t: Traffic, sc: Scenario, trials: int, cfg: DriftConfig, seed0:
         fired.update(_signals(rep))
     out = {"description": sc.description, "n_baseline": sc.n_baseline, "n_recent": sc.n_recent, "trials": trials, "detected": ok,
            "detection_rate": round(ok / trials, 4), "ci95": wilson(ok, trials), "signals_fired": dict(fired.most_common())}
-    if sc.name.startswith("intent_shift"):
+    if sc.name.startswith(("intent_shift", "known_intent")):
         out["correct_attribution"] = attrib
-    if sc.name.startswith("new_topic"):
+    if sc.name.startswith(("new_topic", "known_intent")):
         out["topics_recovered_per_report"] = round(recovered / trials, 3)
         out["unmatched_significant_clusters_per_report"] = round(spurious / trials, 3)
     return out
@@ -328,9 +351,11 @@ def illustrate(t: Traffic, cfg: DriftConfig, trials: int, seed0: int = 1000) -> 
     return out
 
 
-def _link_to_discovery(t: Traffic, rep: dict, rec: Window) -> dict:
-    """Run the production proposal builder on the recent low-evidence complaints and report how much of each drift cluster it covers."""
+def _proposals(t: Traffic, rec: Window) -> list[dict]:
+    """The production proposal builder (discovery) on the recent window's low-evidence or abstained complaints, selected as the discovery job selects them."""
     cands = [i for i, r in enumerate(rec.emb_rows) if r["evidence"] < t.novelty_threshold or r["status"] == "abstained"]
+    if not cands:
+        return []
     X = rec.X[cands]
     neighbors = []
     for v in X:
@@ -338,8 +363,41 @@ def _link_to_discovery(t: Traffic, rep: dict, rec: Window) -> dict:
         top = np.argsort(-sims)[:5]
         neighbors.append(Neighbors([t.corpus_intent[j] for j in top], [t.corpus_product[j] for j in top], float(sims[top[0]])))
     labels = {i: None for i in sorted(set(t.corpus_intent))}
-    props = build_proposals([rec.emb_rows[i]["complaint"] for i in cands], X, neighbors, [rec.emb_rows[i]["evidence"] for i in cands], t.corpus_text,
-                            DiscoveryParams(), labels, request_ids=[rec.emb_rows[i]["request_id"] for i in cands])
+    return build_proposals([rec.emb_rows[i]["complaint"] for i in cands], X, neighbors, [rec.emb_rows[i]["evidence"] for i in cands], t.corpus_text,
+                           DiscoveryParams(), labels, request_ids=[rec.emb_rows[i]["request_id"] for i in cands])
+
+
+def run_small_topics(t: Traffic, cfg: DriftConfig, trials: int, counts: tuple[int, ...] = (4, 6), seed0: int = 1000) -> dict:
+    """Small new topics: alarm versus review queue. The drift alarm has a 1% false-alarm budget, so a cluster of 4 to 6 complaints is largely below what
+    it can certify; discovery has no such budget and puts proposals in front of a person instead. Measured on the SAME windows as the new_topic_*
+    scenarios: a topic counts as surfaced when one proposal is at least 70% its complaints. The no-change control gives the review load (proposals per
+    window with nothing injected), which is the price of that sensitivity."""
+    out = {}
+    for n in counts:
+        sc = scenario_new_topic(n)
+        alarm = surfaced = other = 0
+        for s in range(trials):
+            base, rec, meta = _trial(t, seed0 + s, sc, N_BASELINE, N_RECENT)
+            rows = {r["request_id"]: r for r in rec.rows}
+            alarm += _detect_topic(analyze(rec, base, cfg), meta, rec)[0]
+            hit = False
+            for p in _proposals(t, rec):
+                cls, k = Counter(rows[i]["truth"] for i in p["member_request_ids"]).most_common(1)[0]
+                if cls in meta["targets"] and k / len(p["member_request_ids"]) >= 0.7:
+                    hit = True
+                else:
+                    other += 1
+            surfaced += hit
+        out[f"new_topic_{n}"] = {"injected": n, "trials": trials, "drift_alarm": alarm, "discovery_proposal": surfaced, "discovery_ci95": wilson(surfaced, trials),
+                                 "other_proposals_per_window": round(other / trials, 2)}
+    ctl = [len(_proposals(t, _trial(t, 5000 + s, scenario_no_drift, N_BASELINE, N_RECENT)[1])) for s in range(trials)]
+    out["no_change"] = {"trials": trials, "proposals_per_window": round(float(np.mean(ctl)), 2), "windows_with_a_proposal": int(sum(c > 0 for c in ctl))}
+    return out
+
+
+def _link_to_discovery(t: Traffic, rep: dict, rec: Window) -> dict:
+    """Run the production proposal builder on the recent low-evidence complaints and report how much of each drift cluster it covers."""
+    props = _proposals(t, rec)
     links = []
     for c in rep["emerging_clusters"]:
         if not c["significant"]:
@@ -366,6 +424,7 @@ def run_demo(embedder, trials: int = 30, aa_trials: int = 100, data_dir: Path | 
         "config": cfg.public(),
         "control": [run_control(t, aa_trials, cfg), run_control(t, aa_trials, cfg, 140, 70, distinct=True)],
         "scenarios": {sc.name: run_scenario(t, sc, trials, cfg) for sc in SCENARIOS},
+        "small_topics": run_small_topics(t, cfg, trials),
     }
     out["examples"] = illustrate(t, cfg, trials)
     out["meta"]["elapsed_s"] = round(time.perf_counter() - t0, 1)
@@ -393,6 +452,19 @@ def render_markdown(r: dict) -> str:
             note.append(f"{s['topics_recovered_per_report']} injected topics recovered per report; {s['unmatched_significant_clusters_per_report']} unmatched significant clusters per report")
         fired = ", ".join(f"{k} ({v})" for k, v in list(s["signals_fired"].items())[:4])
         lines.append(f"| `{name}` | {s['description']} | {s['detected']}/{s['trials']} ({s['detection_rate']:.0%}) | {s['ci95'][0]:.0%} to {s['ci95'][1]:.0%} | {'; '.join(note + ([f'fired: {fired}'] if fired else []))} |")
+    if r.get("small_topics"):
+        st = r["small_topics"]
+        lines += ["", "## Small new topics: alarm versus review queue", "",
+                  "The same windows as `new_topic_4` and `new_topic_6`. The drift alarm has a 1% false-alarm budget, and a pure cluster of 4 recent complaints cannot "
+                  "reach p < 1% at these window sizes even before any correction. Discovery (`build_proposals`, the production code) has no alarm budget: it puts "
+                  "proposals in front of a person, so its sensitivity is paid for in review load (last column, and the control row).", "",
+                  "| Injected topic | Drift alarm | Discovery proposal for the topic | 95% interval | Other proposals per window |", "|---|---|---|---|---|"]
+        for k, v in st.items():
+            if k.startswith("new_topic"):
+                lines.append(f"| {v['injected']} of 100 complaints | {v['drift_alarm']}/{v['trials']} | {v['discovery_proposal']}/{v['trials']} | "
+                             f"{v['discovery_ci95'][0]:.0%} to {v['discovery_ci95'][1]:.0%} | {v['other_proposals_per_window']} |")
+        nc = st["no_change"]
+        lines.append(f"| nothing (control) | - | - | - | {nc['proposals_per_window']} (a proposal in {nc['windows_with_a_proposal']} of {nc['trials']} windows) |")
     lines += ["", "## What the alerts say", "",
               "From the first trial of each scenario that detected the change (the table above gives how often that happens). The text is exactly what the API returns.", ""]
     for name, e in r["examples"].items():

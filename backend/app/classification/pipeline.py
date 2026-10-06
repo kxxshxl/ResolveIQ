@@ -5,7 +5,7 @@ import asyncio
 import logging
 
 from app.classification.affect import AffectModel
-from app.classification.strategies import (Classifier, Dist, EmbeddingClassifier, LLMZeroShotClassifier,
+from app.classification.strategies import (Dist, EmbeddingClassifier, LLMZeroShotClassifier,
                                            RuleClassifier)
 from app.classification.taxonomy import DIMENSIONS, TaxonomyService
 from app.core.config import Settings

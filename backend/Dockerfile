@@ -4,10 +4,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 \
     HF_HOME=/opt/hf TOKENIZERS_PARALLELISM=false DATA_DIR=/app/data
 WORKDIR /app
 
-# CPU-only torch keeps the image small; models run fine on CPU for MiniLM-class sizes.
-COPY requirements.txt .
-RUN pip install --index-url https://download.pytorch.org/whl/cpu torch \
- && pip install -r requirements.txt
+# CPU-only torch keeps the image small; models run fine on CPU for MiniLM-class sizes. constraints.txt pins every package to the versions
+# the recorded evaluation used (scripts/freeze_constraints.py), so an image built later does not silently run newer libraries.
+COPY requirements.txt constraints.txt ./
+RUN pip install --index-url https://download.pytorch.org/whl/cpu "torch==$(sed -n 's/^torch==//p' constraints.txt)" \
+ && pip install -r requirements.txt -c constraints.txt
 
 # Bake the embedding + reranker weights into the image so containers start offline and fast.
 RUN python -c "from sentence_transformers import SentenceTransformer, CrossEncoder; \

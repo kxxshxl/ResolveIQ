@@ -45,7 +45,7 @@ def _recovered(truth: list[str], groups: list[list[int]], wanted: set[str] | Non
 async def clustering_suite(svc: Services, sets: EvalSets) -> dict:
     rows_src = [("test", r) for r in sets.test] + [("gold", r) for r in sets.gold] + [("blind", r) for r in sets.blind] + [("val", r) for r in sets.val]
     seen, items = set(), []
-    for split, r in rows_src:
+    for _split, r in rows_src:
         k = " ".join(r["text"].lower().split())
         if k not in seen:
             seen.add(k)

@@ -18,7 +18,7 @@ load test (Intel(R) Core(TM) i9-14900HX, 31.7 GB, NVIDIA GeForce RTX 4070 Laptop
 
 ## 1. Baseline
 
-Code at commit `1063ce1` (no LLM concurrency limit; LLM and breaker fixes from the previous phase in place). No LLM, 10 users: 17.4 req/s,
+Code at commit `c291825` (recorded as `1063ce1` before the history was rewritten; no LLM concurrency limit; LLM and breaker fixes from the previous phase in place). No LLM, 10 users: 17.4 req/s,
 P50 570 ms. Real LLM, 10 users: 570 ms P50 but 30.1 s P95, because the circuit breaker repeatedly opens and
 sheds 85% of requests to evidence-only answers while the requests that do wait sit in the model's queue (LLM busy 235%, i.e. several calls overlapping, only
 0.075 model-generated answers/s).

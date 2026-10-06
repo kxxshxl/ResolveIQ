@@ -14,7 +14,7 @@ What is compared, and how (docs/drift.md has the reasoning and the measured fals
 
 The p-values of the first three families are combined with the Holm-Bonferroni procedure at one family-wise level (`alpha`), and an alert also
 needs the effect to exceed a minimum size, so a handful of requests cannot raise one and a million requests cannot raise one over a trivial
-difference. New-topic clusters have their own budget of the same size (Bonferroni over the clusters tested).
+difference. New-topic clusters have their own budget of the same size (Bonferroni over the clusters tested, weighted towards clusters the corpus does not explain).
 """
 from __future__ import annotations
 
@@ -46,12 +46,13 @@ class DriftConfig:
     permutations: int = 500
     max_clusters: int = 10
     novelty_threshold: float = 0.80      # mean evidence below this: the corpus does not explain the cluster
+    unexplained_weight: float = 0.75     # share of the cluster test budget given to clusters the corpus does not explain (0 = equal split; see _cluster_weights)
     cluster: DiscoveryParams = field(default_factory=lambda: DiscoveryParams(distance_threshold=0.65, min_cluster_size=4))
     seed: int = 17
 
     def public(self) -> dict:
         keys = ("min_requests", "alpha", "psi_threshold", "ks_threshold", "abstention_increase", "embedding_shift", "cluster_enrichment",
-                "new_topic_baseline_share", "unseen_quantile", "min_embedded", "permutations", "novelty_threshold")
+                "new_topic_baseline_share", "unseen_quantile", "min_embedded", "permutations", "novelty_threshold", "unexplained_weight")
         return {k: getattr(self, k) for k in keys} | {"cluster_distance_threshold": self.cluster.distance_threshold, "cluster_min_size": self.cluster.min_cluster_size}
 
 
@@ -138,16 +139,36 @@ def _describe_cluster(rank: int, recent_idx: list[int], m: int, p_adj: float, en
     }
 
 
+def _unexplained(members: list[int], rows: list[dict], cfg: DriftConfig) -> bool:
+    """Whether the corpus explains a cluster poorly: mean evidence of ALL its members (both windows) below the novelty threshold. Evidence belongs to
+    the complaint text, not to the window it arrived in, so this is decided blind to window membership and may steer the test budget."""
+    ev = [rows[i]["evidence"] for i in members if rows[i].get("evidence") is not None]
+    return bool(ev) and float(np.mean(ev)) < cfg.novelty_threshold
+
+
+def _cluster_weights(unexplained: list[bool], share: float) -> list[float]:
+    """Weighted Bonferroni (weights sum to 1; cluster i is tested at alpha * w_i). Clusters the corpus does not explain share `share` of the budget,
+    the others the rest; with only one kind present it gets everything, and share = 0 gives the plain equal split. Known-topic surges keep a
+    second detector (the category-mix tests); an unexplained new topic has only this one, which is why the budget leans its way."""
+    n_u = sum(unexplained)
+    n_e = len(unexplained) - n_u
+    if not share or not n_u or not n_e:
+        return [1.0 / len(unexplained)] * len(unexplained)
+    return [share / n_u if u else (1.0 - share) / n_e for u in unexplained]
+
+
 def _joint_clusters(recent: Window, baseline: Window, cfg: DriftConfig) -> list[dict]:
     """Cluster both windows together, blind to which window each complaint came from, then test each cluster for over-representation of recent ones.
 
     Because the clustering ignores window membership, under 'no drift' the number of recent complaints in any cluster is hypergeometric given the
-    cluster sizes: an exact conditional test, with no novelty threshold to tune. Exact duplicates were removed per window beforehand.
+    cluster sizes: an exact conditional test. Exact duplicates were removed per window beforehand. The correction over clusters is a weighted
+    Bonferroni whose weights depend only on evidence (blind to window membership), so the family-wise level is unchanged.
     """
     from scipy.stats import hypergeom
 
     nr, nb = len(recent.emb_rows), len(baseline.emb_rows)
     X = np.vstack([recent.X, baseline.X])
+    rows = recent.emb_rows + baseline.emb_rows
     cands = []
     for g in cluster_embeddings(X, cfg.cluster):
         rec = [i for i in g if i < nr]
@@ -155,11 +176,12 @@ def _joint_clusters(recent: Window, baseline: Window, cfg: DriftConfig) -> list[
             cands.append((g, rec))
     if not cands:
         return []
+    weights = _cluster_weights([_unexplained(g, rows, cfg) for g, _ in cands], cfg.unexplained_weight)
     N = nr + nb
     scored = []
-    for g, rec in cands:
+    for (g, rec), w in zip(cands, weights):
         m, k = len(g), len(rec)
-        scored.append((min(1.0, float(hypergeom.sf(k - 1, N, nr, m)) * len(cands)), (k / m) / (nr / N), rec, m))
+        scored.append((min(1.0, float(hypergeom.sf(k - 1, N, nr, m)) / w), (k / m) / (nr / N), rec, m))
     scored.sort(key=lambda s: (s[0], -len(s[2])))
     return [_describe_cluster(rank, rec, m, p, enr, recent, baseline, cfg, len(cands))
             for rank, (p, enr, rec, m) in enumerate(scored, 1) if p <= WATCH_P][: cfg.max_clusters]

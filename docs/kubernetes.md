@@ -4,10 +4,10 @@ ResolveIQ's manifests (`k8s/base/`) were applied to a real cluster for the first
 page says what that cluster was, how to reproduce it, what was and was **not** tested, what the test found, and what would change for a
 cloud deployment. **Nothing here is a claim of production-grade Kubernetes infrastructure**: the cluster is one node on a laptop.
 
-> **Which code this evidence is from.** The cluster run and every result in `k8s/local/results/2026-10-06/` were recorded on commit `2d32e72` (the Kubernetes commit). The console, adaptive-retrieval,
-> database and security work that followed (migrations 004, new endpoints, a new prompt) was **not** redeployed to the cluster: a rebuild was started and the Docker engine on the laptop stopped
-> responding during the image build, and the redeploy was dropped for lack of time. The manifests did not change, the new settings all have defaults, and the new migration is applied by the same
-> migrate Job, but that is reasoning, not a test. To re-verify: `bash k8s/local/deploy.sh --ingress && python k8s/local/e2e_test.py --ingress`.
+> **Which code this evidence is from.** The first cluster run (`k8s/local/results/2026-10-06/`) was recorded on commit `b57fe0c` (recorded there as `2d32e72`, before the history was rewritten).
+> On 2026-10-07 the **current code was redeployed** to the same cluster and re-tested (`k8s/local/results/2026-10-07/`): the end-to-end test passed **22 of 22** checks, the LLM-down variant
+> **16 of 16**, the migrate Job upgraded the existing database in place (migrations 003 and 004), and the pods ran the pinned package versions of `backend/constraints.txt`. The rolling-restart,
+> taxonomy-propagation, packet-dropping-LLM and NetworkPolicy runs below were not repeated on the new code; the manifests they exercised did not change.
 
 ## 1. What was tested, and what was not
 
@@ -110,7 +110,8 @@ file and open `https://support.example.com:8443`, accepting the self-signed cert
 
 ## 4. What the end-to-end test showed
 
-`python k8s/local/e2e_test.py --ingress` (output in `results/2026-10-06/e2e_full_via_ingress.txt`): **22 checks, 22 passed.** Highlights:
+`python k8s/local/e2e_test.py --ingress`: **22 checks, 22 passed**, on 2026-10-06 (`results/2026-10-06/e2e_full_via_ingress.txt`) and again on the current code on 2026-10-07
+(`results/2026-10-07/e2e_full_via_ingress.txt`: resolve in 8.4 s, of which classification 2.5 s on the pod's CPU and generation 5.9 s; 37 spans in one trace). Highlights:
 
 * Resolve through Ingress → frontend → backend: HTTP 200, `status=resolved`, `generator=ollama:qwen3:4b-instruct`, 5 steps, 2 citations that
   point at retrieved evidence, validation valid, in 8.5–11.4 s over several runs (classification 2.3–3.3 s on the pod's CPU, generation 6–9 s on
@@ -155,6 +156,8 @@ Every item below was found by the deployment itself; none was visible in the man
 | 8 | `/health/ready` and the manifests were fine, but the documented release order was wrong: the migrate Job needs the ConfigMap, and API pods started before the seed had an empty taxonomy. | Corrected in `k8s/base/kustomization.yaml`; `deploy.sh` encodes the order. Finding 5's sync also makes late-seeded pods self-correct. |
 | 9 | The worker Deployment had no readiness probe. | Added (`/metrics` on 9100). |
 | 10 | Memory: each API or worker pod holds ~2.3–2.4 GB (RSS). Restarting the API and worker together, plus an HPA surge, put 5–6 such pods on a 15 GB VM; the node thrashed, the API server timed out and kind's network-policy agent lost its API watch. | Local overlay caps the HPA at 2 replicas; `deploy.sh` rolls the Deployments one after another. See §6 for the policy agent. |
+| 11 | (2026-10-07) The image built from unpinned requirements 14 hours after the evaluation already ran different library versions (`fastapi` 0.142.2, `torch` 2.14.1, `transformers` 5.18.0 versus 0.141.1, 2.8.0, 5.17.0), so the deployed system was not the evaluated one. | `backend/constraints.txt` (generated from the evaluation environment by `scripts/freeze_constraints.py`) is applied by the Dockerfile and CI; the redeployed pods report the evaluated versions. |
+| 12 | (2026-10-07) The migrate Job's first pod timed out connecting to Postgres (kindnet policy-sync lag, see section 6); the Job retried and succeeded. | None needed: the Job's `backoffLimit` absorbs it. A production CNI should not show the lag. |
 
 ## 6. Limitations and caveats (read before trusting any of this)
 
@@ -222,4 +225,4 @@ Every item below was found by the deployment itself; none was visible in the man
 `k8s/base/` (the cloud manifests, now with OTEL/LLM settings, probes, preStop, migrate policy) · `k8s/local/` (`kind-config.yaml`,
 `kustomization.yaml`, `postgres.yaml`, `redis.yaml`, `jaeger.yaml`, `networkpolicy-local.yaml`, `Dockerfile`, `make_secrets.py`,
 `deploy.sh`, `e2e_test.py`, `taxonomy_propagation_check.py`, `degraded_latency.py`, `rollout_availability.py`) ·
-`k8s/local/results/2026-10-06/` (raw outputs of every run quoted above, including the ones discarded as invalid).
+`k8s/local/results/2026-10-06/` (raw outputs of every run quoted above, including the ones discarded as invalid) · `k8s/local/results/2026-10-07/` (the re-run on the current code).

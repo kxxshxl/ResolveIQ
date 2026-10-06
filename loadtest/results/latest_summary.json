@@ -1,6 +1,7 @@
 {
   "suite": "2026-10-06-final",
-  "commit": "2e68d3d",
+  "commit": "9b6f646",
+  "commit_recorded": "2e68d3d",
   "dirty": true,
   "date": "2026-10-06 21:31:46",
   "description": "Closed-loop Locust load test of one API process (suite 2026-10-06-final): Intel(R) Core(TM) i9-14900HX, 31.7 GB RAM, GPU NVIDIA GeForce RTX 4070 Laptop GPU, 8188 MiB, 576.28, shared by the LLM, NLI and embedding models; Postgres and Redis in Docker on the same machine. Full tables: loadtest/results/2026-10-06-final/SUMMARY.md.",

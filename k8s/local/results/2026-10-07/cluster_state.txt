@@ -1,0 +1,84 @@
+# kubectl state after the 2026-10-07 redeploy (working tree on top of 250418b; see README.md in this folder)
+NAME                            READY   STATUS      RESTARTS       AGE     IP            NODE                      NOMINATED NODE   READINESS GATES
+pod/backend-859fc77c45-d89rl    1/1     Running     0              98s     10.244.0.18   resolveiq-control-plane   <none>           <none>
+pod/backend-859fc77c45-gqwmp    1/1     Running     0              109s    10.244.0.17   resolveiq-control-plane   <none>           <none>
+pod/frontend-776bcd757f-5nlb9   1/1     Running     13 (10m ago)   15h     10.244.0.10   resolveiq-control-plane   <none>           <none>
+pod/frontend-776bcd757f-r8jfs   1/1     Running     13 (10m ago)   15h     10.244.0.3    resolveiq-control-plane   <none>           <none>
+pod/jaeger-64f87b946c-dv6qd     1/1     Running     3 (11m ago)    16h     10.244.0.4    resolveiq-control-plane   <none>           <none>
+pod/postgres-0                  1/1     Running     3 (11m ago)    16h     10.244.0.8    resolveiq-control-plane   <none>           <none>
+pod/redis-797c7656d-mcxbg       1/1     Running     3 (11m ago)    16h     10.244.0.2    resolveiq-control-plane   <none>           <none>
+pod/resolveiq-migrate-tk6nc     0/1     Completed   0              2m8s    10.244.0.16   resolveiq-control-plane   <none>           <none>
+pod/resolveiq-migrate-ttk7r     0/1     Error       0              4m32s   10.244.0.15   resolveiq-control-plane   <none>           <none>
+pod/worker-844f8df945-fhpxx     1/1     Running     0              87s     10.244.0.19   resolveiq-control-plane   <none>           <none>
+
+NAME               TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)              AGE   SELECTOR
+service/backend    ClusterIP   10.96.206.113   <none>        8000/TCP             16h   app=backend
+service/frontend   ClusterIP   10.96.157.139   <none>        80/TCP               16h   app=frontend
+service/jaeger     ClusterIP   10.96.73.250    <none>        4318/TCP,16686/TCP   16h   app=jaeger
+service/postgres   ClusterIP   10.96.246.138   <none>        5432/TCP             16h   app=postgres
+service/redis      ClusterIP   10.96.134.54    <none>        6379/TCP             16h   app=redis
+
+NAME                                          REFERENCE            TARGETS        MINPODS   MAXPODS   REPLICAS   AGE
+horizontalpodautoscaler.autoscaling/backend   Deployment/backend   cpu: 62%/65%   2         2         2          16h
+
+NAME                                 MIN AVAILABLE   MAX UNAVAILABLE   ALLOWED DISRUPTIONS   AGE
+poddisruptionbudget.policy/backend   1               N/A               1                     16h
+
+NAME                                  CLASS   HOSTS                 ADDRESS     PORTS     AGE
+ingress.networking.k8s.io/resolveiq   nginx   support.example.com   localhost   80, 443   16h
+
+NAME                                             POD-SELECTOR   AGE
+networkpolicy.networking.k8s.io/allow-backend    app=backend    16h
+networkpolicy.networking.k8s.io/allow-frontend   app=frontend   16h
+networkpolicy.networking.k8s.io/allow-jaeger     app=jaeger     16h
+networkpolicy.networking.k8s.io/allow-migrate    app=migrate    16h
+networkpolicy.networking.k8s.io/allow-postgres   app=postgres   16h
+networkpolicy.networking.k8s.io/allow-redis      app=redis      16h
+networkpolicy.networking.k8s.io/allow-worker     app=worker     16h
+networkpolicy.networking.k8s.io/default-deny     <none>         16h
+
+NAME                                    STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS   VOLUMEATTRIBUTESCLASS   AGE   VOLUMEMODE
+persistentvolumeclaim/data-postgres-0   Bound    pvc-191efad1-0af8-432e-870a-c09c9c88af7a   2Gi        RWO            standard       <unset>                 16h   Filesystem
+
+# kubectl top pods
+NAME                        CPU(cores)   MEMORY(bytes)   
+backend-859fc77c45-d89rl    3m           2345Mi          
+backend-859fc77c45-gqwmp    626m         2494Mi          
+frontend-776bcd757f-5nlb9   1m           24Mi            
+frontend-776bcd757f-r8jfs   1m           23Mi            
+jaeger-64f87b946c-dv6qd     2m           66Mi            
+postgres-0                  6m           73Mi            
+redis-797c7656d-mcxbg       9m           19Mi            
+worker-844f8df945-fhpxx     2m           3019Mi          
+
+# images
+backend-859fc77c45-d89rl  sha256:6c60d8f3dcaffc142c5f2817e579e22450691dbcae7a5d95e0cb00f47f00faaa
+backend-859fc77c45-gqwmp  sha256:6c60d8f3dcaffc142c5f2817e579e22450691dbcae7a5d95e0cb00f47f00faaa
+frontend-776bcd757f-5nlb9  sha256:405a4822ada3871d20097b7dacf79311cabe4793b3a8a95bb4096a12e461523f
+frontend-776bcd757f-r8jfs  sha256:405a4822ada3871d20097b7dacf79311cabe4793b3a8a95bb4096a12e461523f
+jaeger-64f87b946c-dv6qd  docker.io/jaegertracing/jaeger@sha256:81afdc6ae85f52a5f063c80fcdb201798bb283d81067211121291b64026c19c2
+postgres-0  docker.io/pgvector/pgvector@sha256:ac08538c6f8b9904c33c8224c5e5706dbe760aca29db1d096972b4052c22a75d
+redis-797c7656d-mcxbg  docker.io/library/redis@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
+resolveiq-migrate-tk6nc  sha256:6c60d8f3dcaffc142c5f2817e579e22450691dbcae7a5d95e0cb00f47f00faaa
+resolveiq-migrate-ttk7r  sha256:6c60d8f3dcaffc142c5f2817e579e22450691dbcae7a5d95e0cb00f47f00faaa
+worker-844f8df945-fhpxx  sha256:6c60d8f3dcaffc142c5f2817e579e22450691dbcae7a5d95e0cb00f47f00faaa
+
+# schema_migrations
+001_init.sql|2026-10-06 02:40:31.73358+00
+002_discovery_and_queue.sql|2026-10-06 02:40:31.786919+00
+003_drift.sql|2026-10-06 19:00:49.093702+00
+004_cases_feedback_hardening.sql|2026-10-06 19:00:49.111828+00
+
+# backend pod: pinned package versions (backend/constraints.txt)
+fastapi==0.141.1
+huggingface_hub==1.33.0
+numpy==2.4.6
+psycopg==3.3.6
+pydantic==2.13.5
+scikit-learn==1.9.1
+scipy==1.17.1
+sentence-transformers==6.1.0
+starlette==1.7.0
+torch==2.8.0+cpu
+transformers==5.17.0
+uvicorn==0.54.0

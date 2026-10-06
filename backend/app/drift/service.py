@@ -30,7 +30,7 @@ class DriftService:
         return DriftConfig(
             min_requests=s.drift_min_requests, alpha=s.drift_alpha, psi_threshold=s.drift_psi_threshold, ks_threshold=s.drift_ks_threshold,
             abstention_increase=s.drift_abstention_increase, embedding_shift=s.drift_embedding_shift, unseen_quantile=s.drift_unseen_quantile,
-            permutations=s.drift_permutations, novelty_threshold=s.discovery_novelty_threshold,
+            permutations=s.drift_permutations, novelty_threshold=s.discovery_novelty_threshold, unexplained_weight=s.drift_unexplained_weight,
             # the clustering routine discovery uses (same minimum size); the distance is looser because here in-domain complaints are clustered too
             cluster=DiscoveryParams(distance_threshold=s.drift_cluster_distance, min_cluster_size=s.discovery_min_cluster_size))
 

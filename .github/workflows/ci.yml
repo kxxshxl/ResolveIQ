@@ -25,14 +25,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
-        with: {python-version: "3.11", cache: pip, cache-dependency-path: backend/requirements-dev.txt}
-      - name: Install (CPU torch)
+        with: {python-version: "3.11", cache: pip, cache-dependency-path: backend/constraints.txt}
+      - name: Install (CPU torch, versions pinned by constraints.txt)
         working-directory: backend
         run: |
-          pip install torch --index-url https://download.pytorch.org/whl/cpu
-          pip install -r requirements-dev.txt
+          pip install "torch==$(sed -n 's/^torch==//p' constraints.txt)" --index-url https://download.pytorch.org/whl/cpu
+          pip install -r requirements-dev.txt -c constraints.txt
       - uses: actions/cache@v4
         with: {path: ~/.cache/huggingface, key: hf-models-v2-minilm-reranker-deberta-large}
+      - name: Lint (pyflakes + bugbear, backend/ruff.toml)
+        working-directory: backend
+        run: python -m ruff check app scripts tests
       - name: Create the least-privilege app role
         run: PGPASSWORD=ci-owner-pw psql -h 127.0.0.1 -p 5433 -U resolveiq_owner -d resolveiq -c "CREATE ROLE resolveiq_app LOGIN PASSWORD 'ci-app-pw'"
       - name: Tests

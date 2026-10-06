@@ -57,8 +57,12 @@ The explanation shipped with each alert comes from the per-category table: share
 Recent and baseline complaints (distinct, embedded with the production embedding model) are clustered **together**, without the clustering seeing which window each came from, using the
 same average-linkage routine as discovery (`discovery/clustering.py`) at a looser cosine distance (`DRIFT_CLUSTER_DISTANCE` = 0.65; discovery uses 0.55 on a pre-filtered set, while here the
 in-domain complaints are clustered too). Each cluster with at least 4 recent members is tested: given the cluster size, how likely are this many recent members if the windows were exchangeable?
-Because the clustering ignores window membership, that count is exactly hypergeometric under "no drift", so the p-value is exact, needs no novelty threshold, and is Bonferroni-corrected
-over the clusters tested (own 1% budget). A significant cluster is a **new topic** when at most 15% of its members are from the baseline, and a **surge** of a known topic otherwise.
+Because the clustering ignores window membership, that count is exactly hypergeometric under "no drift", so the p-value is exact and needs no novelty threshold.
+The clusters tested share their own 1% budget through a **weighted Bonferroni** correction: clusters the corpus does not explain (mean evidence of *all* members, both windows, below
+`DISCOVERY_NOVELTY_THRESHOLD`) share `DRIFT_UNEXPLAINED_WEIGHT` = 75% of it and the others the rest (equal split when only one kind is present). The weights are decided from evidence, which
+belongs to the complaint text and not to the window it arrived in, so they are blind to what is being tested and the family-wise level is unchanged. The reason for leaning the budget that way:
+a surge of a *known* topic has a second detector (the intent-mix test), an unexplained new topic has only this one. Before this, an equal split over the 6 to 10 mostly in-domain
+clusters of a typical report needed p below about 0.0012, which a pure cluster of 6 recent complaints (p about 0.0015 to 0.0025 at 100 / 300 requests) never reached. A significant cluster is a **new topic** when at most 15% of its members are from the baseline, and a **surge** of a known topic otherwise.
 It is `covered_by_corpus` when its recent members' mean evidence is above `DISCOVERY_NOVELTY_THRESHOLD` and fewer than half were abstained.
 
 ### 3.4 What was tried, and what it cost to learn
@@ -72,6 +76,13 @@ Recorded because the first designs were wrong:
 * The first demo split the traffic into two *random* halves; the halves differed in label mix, and the tests (correctly) reported drift between two different populations. The split is now
   stratified so label mixes match, and the control scenario is evaluated with and without repeated complaints, which is how the duplicate-counting problem above was found.
 * Because those choices were made while looking at demo output, treat the demo numbers below as a description of this design on this data, not as an independent test.
+* **Weighted correction (added after submission).** A diagnostic on the `new_topic_6` windows showed that clustering was not the bottleneck: in 12 of 30 trials the 5 or 6 injected
+  complaints formed a cluster with no baseline member at all, and the equal Bonferroni split discarded it. The 75% share was fixed before measuring and not tuned. Measured on the same seeds,
+  equal split versus weighted: false alarms 2/200 and 2/200 in both controls; `new_topic_6` 0/30 to 2/30; `new_topic_10` 19/30 to 20/30; three topics at once 0.70 to 0.87 recovered per report;
+  on the held-out `known_intent_returns_10` scenario (a known, corpus-explained intent absent from the baseline; the case the weighting could hurt) cluster recovery 3/30 in both, and the
+  intent-mix test flags it 30/30 either way. The gain is small in the demo because its evidence proxy separates new and known topics poorly (cluster means 0.46 to 0.56 versus 0.56 to 0.66,
+  with the novelty threshold at the in-domain median 0.63, so about half the in-domain clusters also count as unexplained). With well-separated evidence (the synthetic unit test, in-domain
+  0.85 versus new 0.40) a 4-complaint new topic goes from 0 to 5 of 5 seeds.
 
 ## 4. Linking to taxonomy discovery
 
@@ -112,6 +123,7 @@ Trace span: `drift.analyze`.
 | `DRIFT_MIN_REQUESTS` | 30 | below this in either window: report only |
 | `DRIFT_PSI_THRESHOLD`, `DRIFT_KS_THRESHOLD`, `DRIFT_ABSTENTION_INCREASE`, `DRIFT_EMBEDDING_SHIFT` | 0.10, 0.15, 0.10, 0.02 | minimum effect sizes |
 | `DRIFT_CLUSTER_DISTANCE` | 0.65 | grouping distance for new-topic clusters |
+| `DRIFT_UNEXPLAINED_WEIGHT` | 0.75 | share of the new-topic test budget for clusters the corpus does not explain (0 = equal Bonferroni split) |
 | `DRIFT_MAX_EMBED_RECENT`, `DRIFT_MAX_EMBED_BASELINE`, `DRIFT_PERMUTATIONS` | 500, 1000, 500 | cost bounds |
 | `DRIFT_ANALYSIS_HOURS` | 6 | worker schedule (0 = on demand only) |
 | `DRIFT_TRIGGER_DISCOVERY`, `DRIFT_DISCOVERY_COOLDOWN_HOURS` | true, 12 | automatic discovery run for an uncovered cluster |
@@ -147,9 +159,12 @@ Final run (30 trials per scenario, 200 control trials):
 | `billing_dispute` 16% to 40% of recent traffic | detected 30/30, boosted intent named as the top mover 30/30 |
 | 16% to 33% | detected 10/30 (33%); to 25%: 0/30, by design (PSI below 0.10; still 3/30 with 4x the traffic) |
 | high/critical severity 30% to 55% | detected 27/30 (90%); to 40%: 0/30 |
-| 10 of 100 recent complaints are a topic the corpus never saw | cluster recovered 19/30 (63%), 0 unmatched significant clusters |
-| 4 or 6 of 100 | 0/30: **not detectable at this window size** |
-| Three new topics at once (8 each) | at least one recovered 15/30 (50%), 0.7 of 3 topics per report, 0 unmatched clusters |
+| 10 of 100 recent complaints are a topic the corpus never saw | cluster recovered 20/30 (67%), 0 unmatched significant clusters |
+| 6 of 100 | alarm 2/30 (7%); **discovery proposal for the topic 13/30 (43%)** |
+| 4 of 100 | alarm 0/30, impossible at this size (below); discovery proposal 4/30 (13%) |
+| No change: discovery review load | 0.57 proposals per window (a proposal in 16 of 30 windows) |
+| Three new topics at once (8 each) | at least one recovered 17/30 (57%), 0.87 of 3 topics per report, 0 unmatched clusters |
+| A known intent absent from the baseline returns (10 of 100) | 30/30 through the intent-mix test (top mover correct 30/30); as a cluster 3/30 |
 | Whole recent window in chat-widget style | detected 25/30 (83%) through evidence, abstention, centroid and cluster signals |
 | Corpus loses the tickets for 3 of 9 intents | detected 2/30 (7%) |
 
@@ -160,8 +175,11 @@ An integration test does the same against Postgres with the real API (`tests/tes
 
 ## 9. Limitations and false-positive behaviour
 
-* **Power is limited and depends on volume.** A new topic needs roughly 8 to 10 complaints that cluster together in one window; at 100 requests per window, 4 to 6 are invisible and 10 are found about
-  two times in three. MiniLM puts new telecom topics close to existing ones, so single-complaint novelty is weak (the discovery evaluation reports AUC about 0.8 for the best single signal). A larger embedding model would raise power;
+* **Power is limited and depends on volume, and small topics are the review queue's job, not the alarm's.** The alarm needs roughly 8 to 10 complaints that cluster together in one window;
+  at 100 requests per window, 6 are found 2 times in 30 and 10 about two times in three. A topic of 4 is out of reach by arithmetic: with about 76 distinct recent and 130 distinct baseline
+  complaints (repeats collapsed), even a cluster of 4 recent complaints and no baseline member has p = C(76,4)/C(206,4), about 0.017 (0.017 to 0.027 across the 30 trials), above the 1% budget before any correction. For these sizes the
+  discovery job (no alarm budget, every proposal reviewed by a person) is the path that works: it surfaces a proposal for a 6-complaint topic in 13 of 30 windows and for a 4-complaint topic
+  in 4 of 30, while also producing about 0.6 proposals per window that match no injected topic (the same rate with nothing injected), which is the review load that sensitivity costs. MiniLM puts new telecom topics close to existing ones, so single-complaint novelty is weak (the discovery evaluation reports AUC about 0.8 for the best single signal). A larger embedding model would raise power;
   it was not tried. Real windows are larger, but real topics also arrive more slowly, and this has not been measured on real traffic (there is none).
 * **Small shifts are deliberately not alerts.** A category must move by about 17 points (16% to 33%) at 100 requests for even a one-in-three detection, and a 9-point rise (16% to 25%) is below the PSI gate at any volume.
   Lower `DRIFT_PSI_THRESHOLD` for more sensitivity and accept more alerts.

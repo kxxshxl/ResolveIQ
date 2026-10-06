@@ -145,12 +145,12 @@
           "count": 2
         },
         {
-          "true": "device_issue",
+          "true": "broadband_disconnection",
           "predicted": "slow_speed",
-          "count": 2
+          "count": 1
         },
         {
-          "true": "broadband_disconnection",
+          "true": "device_issue",
           "predicted": "slow_speed",
           "count": 1
         },

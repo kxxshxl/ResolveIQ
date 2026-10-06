@@ -108,3 +108,28 @@ def test_a_live_heartbeat_prevents_recovery(svc, run, handlers):
     run(svc.repo.heartbeat_job, jid)
     run(svc.repo.requeue_stale_jobs, 90)
     assert _status(run, svc, jid)["status"] == "running"
+
+
+def test_heartbeat_survives_a_failed_beat(monkeypatch):
+    """Regression: an exception from one heartbeat UPDATE (a transient DB error) ended the heartbeat task, so a long job stopped beating,
+    was handed back to the queue after WORKER_STALE_SECONDS and ran a second time on another worker while the first was still on it."""
+    from types import SimpleNamespace
+
+    from app import worker
+
+    beats = []
+
+    async def heartbeat_job(job_id):
+        beats.append(job_id)
+        if len(beats) == 1:
+            raise ConnectionError("db blip")
+
+    async def scenario():
+        monkeypatch.setattr(worker, "HEARTBEAT_SECONDS", 0.01)
+        task = asyncio.create_task(worker._heartbeat(SimpleNamespace(repo=SimpleNamespace(heartbeat_job=heartbeat_job)), "j1"))
+        await asyncio.sleep(0.2)
+        alive = not task.done()
+        task.cancel()
+        return alive
+
+    assert asyncio.run(scenario()) and len(beats) >= 3

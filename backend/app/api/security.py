@@ -18,7 +18,8 @@ async def require_api_key(request: Request, svc: Services = Depends(get_services
     if not keys:  # auth disabled (dev). A warning is logged at startup.
         return "anonymous"
     supplied = request.headers.get("x-api-key", "")
-    if not any(hmac.compare_digest(supplied, k) for k in keys):
+    # bytes, not str: compare_digest raises TypeError on non-ASCII str, which turned a garbage header into HTTP 500 instead of 401
+    if not any(hmac.compare_digest(supplied.encode(), k.encode()) for k in keys):
         raise HTTPException(status_code=401, detail="missing or invalid API key", headers={"WWW-Authenticate": "ApiKey"})
     return supplied[:6] + "…"
 

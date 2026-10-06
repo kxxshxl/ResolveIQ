@@ -97,6 +97,12 @@ def _by_name(spans):
     return out
 
 
+def _answer_llm_span(names):
+    """The answer's llm.generate span. The classifier's low-priority fallback may run concurrently and produce its own (usually shed, since the
+    answer holds the only slot), so the position of the span in the list says nothing about which call it was."""
+    return next(s for s in names["llm.generate"] if s.attributes.get("resolveiq.llm.priority") == "normal")
+
+
 def _resolve(traced, complaint=COMPLAINT, request_id=None, strategy=None):
     c, exporter = traced
     exporter.clear()
@@ -127,8 +133,9 @@ def test_resolve_produces_one_trace_covering_every_stage(traced):
     for stage in ("resolve.preprocess", "resolve.cache", "classify", "retrieval.search", "resolve.evidence", "resolve.generate"):
         assert names[stage][0].parent.span_id == resolve.context.span_id, stage
     generate = names["resolve.generate"][0]
-    assert names["llm.generate"][0].parent.span_id == generate.context.span_id
-    assert names["llm.call"][0].parent.span_id == names["llm.generate"][0].context.span_id
+    answer = _answer_llm_span(names)
+    assert answer.parent.span_id == generate.context.span_id
+    assert any(c.parent.span_id == answer.context.span_id for c in names["llm.call"])
     assert names["citations.validate"][0].parent.span_id == generate.context.span_id
 
 
@@ -149,7 +156,7 @@ def test_span_attributes_expose_outcome_and_latency(traced):
     assert names["classify"][0].attributes["resolveiq.confidence.intent"] >= 0
     top = [s.attributes for s in names["retrieval.search"]]
     assert all(a["resolveiq.retrieval.returned"] >= 1 and "resolveiq.retrieval.top_score" in a for a in top)
-    llm = names["llm.generate"][0].attributes
+    llm = _answer_llm_span(names).attributes
     assert llm["gen_ai.operation.name"] == "chat" and llm["gen_ai.system"] == "mock" and "resolveiq.llm.prompt_chars" in llm
     assert names["citations.validate"][0].attributes["resolveiq.validation.valid"] is True
 

@@ -90,6 +90,8 @@ def test_parse_resolution_rejects_garbage():
         parse_resolution("sorry, I cannot help")
     with pytest.raises(GenerationError):
         parse_resolution('{"steps": [{"citations": ["X"]}]}')  # step without text
+    with pytest.raises(GenerationError):  # regression: a step that is a number raised AttributeError, i.e. HTTP 500 instead of the evidence-only fallback
+        parse_resolution('{"issue_summary": "x", "steps": [1, {"text": "a", "citations": []}]}')
 
 
 def _item(i, kind="ticket", steps=("Restart the box", "Check the cable")):
@@ -283,6 +285,43 @@ class _Slow:
 
     async def healthy(self):
         return True
+
+
+def test_llm_budget_is_a_hard_bound_even_when_the_provider_ignores_its_timeout():
+    """Regression: the budget was only passed to the provider as an HTTP timeout, which is per read, not a deadline. A provider that ignores it
+    (or a server that trickles bytes) held a 2 s budget for 10 s, so the request hit the gateway timeout instead of the evidence-only fallback."""
+    import time
+
+    slow = _Slow(delay=10)
+    llm = ResilientLLM([slow], Settings(llm_total_budget_seconds=2.0, llm_timeout_seconds=45.0, llm_max_retries=0, llm_circuit_failure_threshold=3))
+    t0 = time.monotonic()
+    with pytest.raises(LLMUnavailable):
+        asyncio.run(llm.generate("s", "u"))
+    assert time.monotonic() - t0 < 3
+    assert llm.breakers["slow"].is_open, "running out the budget is a timeout, which trips the breaker at once"
+
+
+def test_probe_cancelled_while_queueing_for_a_slot_does_not_wedge_the_breaker():
+    """Regression: a half-open probe cancelled while it waited for a generation slot (request timeout, client gone) never released the probe
+    slot, so the breaker refused every later call until the process restarted."""
+    async def scenario():
+        slow = _Slow(delay=0.01)
+        llm = ResilientLLM([slow], Settings(llm_max_retries=0, llm_circuit_failure_threshold=1, llm_circuit_cooldown_seconds=0.05,
+                                            llm_max_concurrency=1, llm_queue_wait_seconds=5))
+        llm.breakers["slow"].record_failure(decisive=True)
+        await asyncio.sleep(0.1)                         # cooldown over: the next caller is the half-open probe
+        await llm.slots["slow"].acquire()                # another generation holds the only slot
+        probe = asyncio.create_task(llm.generate("s", "u"))
+        await asyncio.sleep(0.05)
+        probe.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await probe
+        llm.slots["slow"].release()
+        res = await llm.generate("s", "u")               # a new probe is admitted and closes the breaker
+        return res, llm.breakers["slow"]
+
+    res, br = asyncio.run(scenario())
+    assert res.provider == "slow" and br.opened_at is None
 
 
 def _limited(provider, **kw):

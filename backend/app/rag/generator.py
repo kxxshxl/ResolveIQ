@@ -37,7 +37,7 @@ def parse_resolution(text: str) -> Resolution:
             escalation_reason=data.get("escalation_reason") or None,
             uncertainty=data.get("uncertainty") or None,
         )
-    except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+    except (json.JSONDecodeError, KeyError, TypeError, ValueError, AttributeError) as exc:  # AttributeError: a step that is a number, not an object
         raise GenerationError(f"LLM JSON did not match the expected schema: {exc}") from exc
 
 

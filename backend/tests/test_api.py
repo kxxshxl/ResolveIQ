@@ -1,4 +1,5 @@
 """API-level tests against the real FastAPI app + Postgres/pgvector (test database) + real embedding/reranker models."""
+import asyncio
 import uuid
 
 import pytest
@@ -101,6 +102,13 @@ def test_ticket_listing_pagination(client):
     assert r["total"] >= 250 and len(r["items"]) == 5 and r["offset"] == 10
 
 
+@pytest.mark.parametrize("path", ["/api/v1/tickets", "/api/v1/articles", "/api/v1/cases"])
+def test_an_absurd_offset_is_a_validation_error_not_a_server_error(client, path):
+    """Regression (found by fuzzing every route): offset had no upper bound, so ?offset=10**23 reached Postgres as an out-of-range bigint: HTTP 500."""
+    assert client.get(path, params={"offset": 10**23}).status_code == 422
+    assert client.get(path, params={"offset": 1_000_000}).json()["items"] == []
+
+
 # ---------------------------------------------------------------- classification through the API
 def test_resolve_returns_structured_classification(client):
     r = client.post("/api/v1/resolve", json={"complaint": PARAPHRASE})
@@ -175,6 +183,31 @@ class _Inventing:
 
     async def healthy(self):
         return True
+
+
+class _Dropping:
+    """A model server whose packets are dropped: the health call never answers."""
+
+    model = "m"
+
+    def __init__(self, name):
+        self.name = name
+
+    async def healthy(self):
+        await asyncio.sleep(3600)
+
+
+def test_readiness_stays_fast_and_ready_when_every_llm_drops_packets(client, svc, monkeypatch):
+    """Regression: providers were health-checked one after another for 3 s each, so with the fallback chain configured (2 providers) and the
+    model network dropping packets, /health/ready took 6 s, past the 5 s readiness timeout in k8s/base/backend.yaml: every API pod would
+    have been taken out of service because the LLM was down. The LLM is reported, never gated on."""
+    import time
+
+    monkeypatch.setattr(svc, "llm", ResilientLLM([_Dropping("ollama"), _Dropping("openai_compat")], svc.settings))
+    t0 = time.monotonic()
+    r = client.get("/health/ready")
+    assert time.monotonic() - t0 < 4, "must stay well inside the 5 s Kubernetes readiness timeout"
+    assert r.status_code == 200 and r.json()["checks"]["llm"] == {"ollama": False, "openai_compat": False}
 
 
 def test_llm_outage_degrades_to_evidence_only_resolution(client, svc, monkeypatch):

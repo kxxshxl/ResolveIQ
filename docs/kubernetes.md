@@ -128,7 +128,11 @@ file and open `https://support.example.com:8443`, accepting the self-signed cert
 `OLLAMA_BASE_URL` was pointed at a closed port and the pods restarted. `e2e_test.py --degraded --ingress` passed
 (`results/2026-10-06/e2e_llm_down_via_ingress.txt`):
 
-* `/health/ready` stays **200** (`llm: {ollama: false}`): a dead model server must not take API pods out of service.
+* `/health/ready` stays **200** (`llm: {ollama: false}`): a dead model server must not take API pods out of service. A later audit found the case these runs did
+  not cover: with the fallback chain configured (two providers) and the model network *dropping* packets, providers were health-checked one after the other
+  for 3 s each, so readiness took 6.0 s, past this probe's 5 s timeout, which would have taken every API pod out of service. They are now checked concurrently
+  (2 s cap) alongside the other checks: measured on the backend image with both providers pointed at an unroutable address, 6.0 s before and 2.0 s after
+  (`tests/test_api.py::test_readiness_stays_fast_and_ready_when_every_llm_drops_packets`). This was verified on the container, not re-run on kind.
 * `POST /api/v1/resolve` → HTTP 200, **`status=degraded`, `generator=extractive`**, 7 steps, 2 valid citations, with the warning
   "LLM unavailable ... returned evidence-only resolution", in ~3.6 s (it is the classifier, not the LLM, that takes the time).
 * Eight consecutive requests all returned evidence-only answers with HTTP 200 (`llm_down_latency_final.txt`).

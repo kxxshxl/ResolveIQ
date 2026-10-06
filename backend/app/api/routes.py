@@ -24,6 +24,8 @@ from app.observability.drift import drift_report
 from app.retrieval.service import STRATEGIES
 from app.services.container import Services
 
+MAX_OFFSET = 1_000_000  # bounded: an unbounded offset reached Postgres as an out-of-range bigint (HTTP 500); page deeper with ?cursor=
+
 ops = APIRouter(tags=["ops"])
 api = APIRouter(prefix="/api/v1", dependencies=[Depends(rate_limit)])
 
@@ -38,6 +40,8 @@ async def health():
 async def ready(svc: Services = Depends(get_services)):
     checks: dict[str, object] = {}
     ok = True
+    # reported, never gated on: started first so an unreachable model server overlaps the other checks instead of adding to them
+    llm_health = asyncio.ensure_future(svc.llm.health()) if svc.llm.available else None
     try:
         await asyncio.wait_for(svc.repo.ping(), 3)
         checks["database"] = "ok"
@@ -58,7 +62,7 @@ async def ready(svc: Services = Depends(get_services)):
         checks["jobs"] = {"mode": svc.settings.job_execution, **await svc.repo.queue_depth()}
     except Exception:  # noqa: BLE001
         pass
-    checks["llm"] = await svc.llm.health() if svc.llm.available else "none configured (evidence-only mode)"
+    checks["llm"] = await llm_health if llm_health is not None else "none configured (evidence-only mode)"
     checks["tracing"] = tracing.status()
     return JSONResponse({"status": "ready" if ok else "not_ready", "checks": checks}, status_code=200 if ok else 503)
 
@@ -66,7 +70,7 @@ async def ready(svc: Services = Depends(get_services)):
 @ops.get("/metrics", include_in_schema=False)
 async def metrics(request: Request, svc: Services = Depends(get_services)):
     token = svc.settings.metrics_token
-    if token and not hmac.compare_digest(request.headers.get("authorization", ""), f"Bearer {token}"):
+    if token and not hmac.compare_digest(request.headers.get("authorization", "").encode(), f"Bearer {token}".encode()):  # bytes: see security.py
         raise HTTPException(status_code=401, detail="metrics token required")
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
@@ -170,13 +174,13 @@ async def _page(svc: Services, kind: str, limit: int, offset: int, intent: str |
 
 
 @api.get("/tickets", summary="Paginated ticket listing (offset, or keyset with ?cursor= for stable, constant-cost deep paging)")
-async def list_tickets(limit: int = Query(20, ge=1, le=100), offset: int = Query(0, ge=0), intent: str | None = None,
+async def list_tickets(limit: int = Query(20, ge=1, le=100), offset: int = Query(0, ge=0, le=MAX_OFFSET), intent: str | None = None,
                        cursor: str | None = Query(None, description="'start' for the first keyset page, then each response's next_cursor"), svc: Services = Depends(get_services)):
     return await _page(svc, "ticket", limit, offset, intent, cursor)
 
 
 @api.get("/articles", summary="Paginated KB article listing (offset, or keyset with ?cursor=)")
-async def list_articles(limit: int = Query(20, ge=1, le=100), offset: int = Query(0, ge=0), intent: str | None = None,
+async def list_articles(limit: int = Query(20, ge=1, le=100), offset: int = Query(0, ge=0, le=MAX_OFFSET), intent: str | None = None,
                         cursor: str | None = Query(None), svc: Services = Depends(get_services)):
     return await _page(svc, "article", limit, offset, intent, cursor)
 

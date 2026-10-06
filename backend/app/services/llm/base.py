@@ -165,7 +165,13 @@ class ResilientLLM:
                 errors.append(f"{p.name}: circuit open")
                 tracing.event("llm.circuit_open", gen_ai__system=p.name)
                 continue
-            if p.name in self.slots and not await self._take_slot(p.name, priority, deadline):
+            try:
+                got_slot = p.name not in self.slots or await self._take_slot(p.name, priority, deadline)
+            except BaseException:
+                if probe:
+                    br.release()  # cancelled while queueing for a slot: a probe slot nobody releases would refuse every later call until restart
+                raise
+            if not got_slot:
                 if probe:
                     br.release()  # we never made the probe call, so let another request try
                 errors.append(f"{p.name}: all {self.s.llm_max_concurrency} generation slot(s) busy")
@@ -182,8 +188,11 @@ class ResilientLLM:
                     t0 = time.perf_counter()
                     try:
                         with tracing.span("llm.call", {"gen_ai.system": p.name, "gen_ai.request.model": p.model, "resolveiq.llm.attempt": attempt}) as sp:
-                            res = await p.generate(system, user, json_mode=json_mode, max_tokens=max_tokens or self.s.llm_max_tokens,
-                                                   temperature=temperature, timeout=min(self.s.llm_timeout_seconds, remaining), seed=seed)
+                            attempt_s = min(self.s.llm_timeout_seconds, remaining)
+                            # The provider's own HTTP timeouts are per operation (connect, gap between reads), not a deadline: a server that trickles
+                            # bytes, or a provider that ignores `timeout`, would outlive the budget. wait_for makes the budget a hard bound.
+                            res = await asyncio.wait_for(p.generate(system, user, json_mode=json_mode, max_tokens=max_tokens or self.s.llm_max_tokens,
+                                                                    temperature=temperature, timeout=attempt_s, seed=seed), attempt_s)
                             if sp.is_recording():
                                 sp.set_attributes(tracing._clean({"gen_ai.usage.input_tokens": res.prompt_tokens,
                                                                   "gen_ai.usage.output_tokens": res.completion_tokens}))
@@ -219,11 +228,13 @@ class ResilientLLM:
             raise LLMOverloaded("LLM busy: " + "; ".join(errors[-4:]))
         raise LLMUnavailable("all LLM providers failed: " + "; ".join(errors[-4:]))
 
-    async def health(self) -> dict[str, bool]:
-        out = {}
-        for p in self.providers:
+    async def health(self, timeout: float = 2.0) -> dict[str, bool]:
+        """Providers are checked concurrently, so a chain of unreachable models costs one timeout, not one per provider: readiness reports
+        this, and a readiness probe that outlives its timeout would take every API pod out of service because the LLM is down."""
+        async def one(p) -> bool:
             try:
-                out[p.name] = await asyncio.wait_for(p.healthy(), 3)
+                return bool(await asyncio.wait_for(p.healthy(), timeout))
             except Exception:  # noqa: BLE001
-                out[p.name] = False
-        return out
+                return False
+        results = await asyncio.gather(*(one(p) for p in self.providers))
+        return {p.name: ok for p, ok in zip(self.providers, results)}

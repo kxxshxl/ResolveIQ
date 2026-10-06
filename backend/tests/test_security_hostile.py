@@ -262,6 +262,14 @@ def test_every_api_route_requires_a_key(locked_client):
     assert locked_client.get("/api/v1/cases", headers={"X-API-Key": "other-" + "j" * 28}).status_code == 200      # every configured key works
 
 
+def test_non_ascii_credentials_are_rejected_not_crashed(locked_client):
+    """Regression: hmac.compare_digest raises TypeError on non-ASCII str, and Starlette decodes header bytes as latin-1, so an X-API-Key or
+    Authorization header containing a byte >= 0x80 produced HTTP 500 (an unhandled exception any anonymous client could trigger) instead of 401."""
+    garbage = "café".encode("latin-1")
+    assert locked_client.get("/api/v1/stats", headers=[(b"x-api-key", garbage)]).status_code == 401
+    assert locked_client.get("/metrics", headers=[(b"authorization", b"Bearer " + garbage)]).status_code == 401
+
+
 def test_ops_endpoints_are_either_harmless_or_token_protected(locked_client):
     assert locked_client.get("/health").status_code == 200
     assert locked_client.get("/metrics").status_code == 401 and locked_client.get("/metrics", headers={"Authorization": "Bearer nope"}).status_code == 401

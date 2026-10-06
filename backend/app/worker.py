@@ -36,7 +36,10 @@ _last_drift = [float("-inf")]
 async def _heartbeat(svc: Services, job_id: str) -> None:
     while True:
         await asyncio.sleep(HEARTBEAT_SECONDS)
-        await svc.repo.heartbeat_job(job_id)
+        try:
+            await svc.repo.heartbeat_job(job_id)
+        except Exception:  # noqa: BLE001 - one failed beat (a DB blip) must not end the heartbeat: the job would be requeued while still running
+            log.warning("heartbeat failed; retrying at the next beat", extra={"job_id": job_id})
 
 
 async def run_one(svc: Services, job: dict) -> str:

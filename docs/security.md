@@ -32,6 +32,14 @@ reasoning or chain-of-thought; the model is asked for a JSON answer only, and no
 complaint and the redacted resolution, as the audit trail always did, and nothing more. A replay is computed from the stored redacted text and is not
 persisted.
 
+## Malformed input and unauthenticated callers
+
+Every `/api/v1` operation in the OpenAPI document was fuzzed once (944 requests: malformed and traversal-looking path ids, out-of-range and SQL-looking query
+values, wrong-typed, oversized, null-byte and deeply nested bodies) against the test database. It found one server error, an unbounded `offset` that reached
+Postgres as an out-of-range bigint; offsets are now bounded and the rerun had 0 server errors. A separate review found that a non-ASCII `X-API-Key` or
+metrics `Authorization` header raised inside `hmac.compare_digest` (HTTP 500 instead of 401); secrets are now compared as bytes. Both have regression tests.
+The fuzz harness itself is not kept in the suite (it takes about 12 minutes).
+
 ## Known gaps (not hidden)
 
 * **Poisoned but not instruction-like content is not detected.** A ticket that confidently states a wrong fix (or a wrong support phone number that also appears in

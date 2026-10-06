@@ -32,8 +32,14 @@ a deterministic seed makes one server reproducible, not two different builds of 
 ## Keeping it available (unchanged by this phase, covered by tests and the load test)
 
 * **One total time budget** per generation (`LLM_TOTAL_BUDGET_SECONDS`, 30 s by default, below the 60 s request timeout), so retries and a provider chain cannot add up to a gateway timeout.
+  Every attempt is wrapped in `asyncio.wait_for`, so the budget is a hard bound and not only an HTTP timeout: httpx timeouts are per operation (connect, the gap
+  between reads), and a server that trickles bytes, or a provider that ignores its timeout, used to outlive the budget (a 2 s budget held for 10 s in the regression test).
 * **A concurrency limit** per provider (`LLM_MAX_CONCURRENCY`, 1 by default for a single local GPU) with a short queue; beyond it the call is shed and the answer degrades to evidence-only instead of queueing without bound.
 * **A circuit breaker** per provider (opens after consecutive failures or a timeout, half-opens after a cooldown with a single probe), exposed as a gauge and in `GET /system/status`.
+  The probe slot is released however the probing request ends, including when it is cancelled while queueing for a generation slot; before that fix such a
+  cancellation left the breaker refusing every call until the process restarted.
+* **Untrusted model output**: any JSON the model returns that does not match the schema (including a step that is a bare number) is a generation error that
+  falls back to the evidence-only answer, never an HTTP 500.
 * **A provider abstraction**: `ollama`, `openai_compat` (OpenAI, vLLM, LM Studio, Ollama `/v1`), `mock`; ordered chain; the last resort is deterministic evidence-only extraction (`degraded`), which is also what runs when no provider is configured.
 * **Abstention before generation**: weak evidence never reaches the model.
 

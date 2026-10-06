@@ -17,12 +17,14 @@ from app.services.container import Services
 from app.system.health import database_health
 from app.system.status import system_status
 
+MAX_OFFSET = 1_000_000  # bounded: an unbounded offset reached Postgres as an out-of-range bigint (HTTP 500); page deeper with ?cursor=
+
 console = APIRouter(prefix="/api/v1", dependencies=[Depends(rate_limit)], tags=["console"])
 
 
 # ------------------------------------------------------------------ cases and replay
 @console.get("/cases", summary="Recent resolutions as replayable cases (redacted complaint snippet, status, rating)")
-async def list_cases(limit: int = Query(25, ge=1, le=100), offset: int = Query(0, ge=0),
+async def list_cases(limit: int = Query(25, ge=1, le=100), offset: int = Query(0, ge=0, le=MAX_OFFSET),
                      status: Literal["resolved", "abstained", "degraded", "unreliable"] | None = None, intent: str | None = Query(None, max_length=64),
                      rated: Literal["none", "helpful", "not_helpful"] | None = None, svc: Services = Depends(get_services)):
     return await svc.cases.list(limit, offset, status, intent, rated)

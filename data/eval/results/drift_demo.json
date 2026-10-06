@@ -18,7 +18,7 @@
       "abstain_below": 0.4908,
       "novelty_threshold": 0.6306
     },
-    "elapsed_s": 20.6
+    "elapsed_s": 21.0
   },
   "config": {
     "min_requests": 30,

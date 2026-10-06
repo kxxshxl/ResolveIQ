@@ -29,9 +29,12 @@ class CheckResult:
 def lookup(data: dict, path: str):
     cur = data
     for part in path.split("."):
-        if not isinstance(cur, dict) or part not in cur:
+        if isinstance(cur, list) and part.isdigit() and int(part) < len(cur):      # "sweep.1" = second entry of a list
+            cur = cur[int(part)]
+        elif isinstance(cur, dict) and part in cur:
+            cur = cur[part]
+        else:
             return None
-        cur = cur[part]
     return cur if isinstance(cur, (int, float)) and not isinstance(cur, bool) else None
 
 

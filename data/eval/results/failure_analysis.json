@@ -1,0 +1,264 @@
+{
+  "note": "hand-written gold and blind complaints (151); dense retrieval and the shipped classifier; no LLM. Evaluation queries are synthetic or hand-written, no customer data.",
+  "queries": {
+    "gold": 101,
+    "blind": 50
+  },
+  "retrieval": {
+    "top1_wrong": {
+      "gold": 9,
+      "blind": 5
+    },
+    "top1_wrong_but_same_intent": 8,
+    "confusions_true_to_retrieved_scenario": [
+      {
+        "true": "plan_downgrade",
+        "predicted": "plan_upgrade_speed",
+        "count": 2
+      },
+      {
+        "true": "wifi_only_drops",
+        "predicted": "slow_wifi_far_room",
+        "count": 1
+      },
+      {
+        "true": "slow_wifi_far_room",
+        "predicted": "slow_peak_speed",
+        "count": 1
+      },
+      {
+        "true": "slow_mobile_data",
+        "predicted": "slow_peak_speed",
+        "count": 1
+      },
+      {
+        "true": "double_charge",
+        "predicted": "late_fee",
+        "count": 1
+      },
+      {
+        "true": "mobile_indoor_coverage",
+        "predicted": "area_outage_mobile",
+        "count": 1
+      },
+      {
+        "true": "otp_missing",
+        "predicted": "late_fee",
+        "count": 1
+      },
+      {
+        "true": "account_compromised",
+        "predicted": "otp_missing",
+        "count": 1
+      }
+    ],
+    "examples": [
+      {
+        "split": "gold",
+        "qid": "gold2-09",
+        "text": "Wi-Fi in this house is a joke. My wife and I both work from home on video calls and keep getting kicked out. Wired works fine so it's your router. Replace it today.",
+        "true_scenario": "wifi_only_drops",
+        "retrieved_scenario": "slow_wifi_far_room",
+        "rank_of_first_relevant": 6
+      },
+      {
+        "split": "gold",
+        "qid": "gold2-15",
+        "text": "My kids' study room is at the far end of the house and the wifi there slows to a crawl during their online classes. They have exams coming up, what can we do?",
+        "true_scenario": "slow_wifi_far_room",
+        "retrieved_scenario": "slow_peak_speed",
+        "rank_of_first_relevant": 4
+      },
+      {
+        "split": "gold",
+        "qid": "gold2-18",
+        "text": "My phone data is basically unusable, 0.3 Mbps, and I use it as my hotspot for work. Paying full price for this? Absolutely ridiculous.",
+        "true_scenario": "slow_mobile_data",
+        "retrieved_scenario": "slow_peak_speed",
+        "rank_of_first_relevant": 2
+      },
+      {
+        "split": "gold",
+        "qid": "gold2-25",
+        "text": "You took 79.99 out of my account twice on the 3rd. I'm now overdrawn because of your mistake and being charged bank fees. Refund it immediately!",
+        "true_scenario": "double_charge",
+        "retrieved_scenario": "late_fee",
+        "rank_of_first_relevant": 2
+      },
+      {
+        "split": "gold",
+        "qid": "gold2-41",
+        "text": "Could I switch to a lower tier plan at the end of my contract? I barely use the data I pay for.",
+        "true_scenario": "plan_downgrade",
+        "retrieved_scenario": "plan_upgrade_speed",
+        "rank_of_first_relevant": 3
+      },
+      {
+        "split": "gold",
+        "qid": "gold2-48",
+        "text": "I run a business from my home office and there is no mobile signal there. Lost customer calls. Terrible coverage, do something.",
+        "true_scenario": "mobile_indoor_coverage",
+        "retrieved_scenario": "area_outage_mobile",
+        "rank_of_first_relevant": 4
+      },
+      {
+        "split": "gold",
+        "qid": "gold2-56",
+        "text": "I need to pay my bill today before the service is cut off and the one-time code isn't arriving. What do I do?",
+        "true_scenario": "otp_missing",
+        "retrieved_scenario": "late_fee",
+        "rank_of_first_relevant": null
+      },
+      {
+        "split": "gold",
+        "qid": "gold2-60",
+        "text": "My number was ported out without my permission and I've lost my phone service. I think someone is trying to get into my bank through my SMS codes. Urgent.",
+        "true_scenario": "account_compromised",
+        "retrieved_scenario": "otp_missing",
+        "rank_of_first_relevant": 2
+      },
+      {
+        "split": "gold",
+        "qid": "gold2-65",
+        "text": "Mobile coverage in our rural area has been out for two days. We can't call emergency services from our phones and nobody gives us an update.",
+        "true_scenario": "area_outage_mobile",
+        "retrieved_scenario": "mobile_indoor_coverage",
+        "rank_of_first_relevant": 2
+      },
+      {
+        "split": "blind",
+        "qid": "blind-03",
+        "text": "Your broadband is a lottery. Cuts out at random, three times during my morning shift handover calls today, and the phone line sounds like frying bacon. Fix the line.",
+        "true_scenario": "random_line_fault",
+        "retrieved_scenario": "evening_drops",
+        "rank_of_first_relevant": 2
+      }
+    ]
+  },
+  "classification": {
+    "intent": {
+      "errors": 9,
+      "confusions": [
+        {
+          "true": "device_issue",
+          "predicted": "broadband_disconnection",
+          "count": 2
+        },
+        {
+          "true": "device_issue",
+          "predicted": "slow_speed",
+          "count": 2
+        },
+        {
+          "true": "broadband_disconnection",
+          "predicted": "slow_speed",
+          "count": 1
+        },
+        {
+          "true": "slow_speed",
+          "predicted": "sim_mobile_connectivity",
+          "count": 1
+        },
+        {
+          "true": "sim_mobile_connectivity",
+          "predicted": "service_outage",
+          "count": 1
+        }
+      ]
+    },
+    "product": {
+      "errors": 7,
+      "confusions": [
+        {
+          "true": "wifi_router",
+          "predicted": "broadband",
+          "count": 2
+        },
+        {
+          "true": "account",
+          "predicted": "broadband",
+          "count": 2
+        },
+        {
+          "true": "broadband",
+          "predicted": "wifi_router",
+          "count": 1
+        },
+        {
+          "true": "broadband",
+          "predicted": "mobile",
+          "count": 1
+        },
+        {
+          "true": "mobile",
+          "predicted": "broadband",
+          "count": 1
+        }
+      ]
+    },
+    "severity": {
+      "errors": 53,
+      "confusions": [
+        {
+          "true": "low",
+          "predicted": "medium",
+          "count": 27
+        },
+        {
+          "true": "high",
+          "predicted": "medium",
+          "count": 11
+        },
+        {
+          "true": "high",
+          "predicted": "critical",
+          "count": 6
+        },
+        {
+          "true": "medium",
+          "predicted": "high",
+          "count": 5
+        },
+        {
+          "true": "critical",
+          "predicted": "high",
+          "count": 2
+        }
+      ]
+    },
+    "sentiment": {
+      "errors": 45,
+      "confusions": [
+        {
+          "true": "frustrated",
+          "predicted": "neutral",
+          "count": 22
+        },
+        {
+          "true": "concerned",
+          "predicted": "neutral",
+          "count": 10
+        },
+        {
+          "true": "angry",
+          "predicted": "neutral",
+          "count": 6
+        },
+        {
+          "true": "frustrated",
+          "predicted": "angry",
+          "count": 2
+        },
+        {
+          "true": "angry",
+          "predicted": "frustrated",
+          "count": 2
+        }
+      ]
+    }
+  },
+  "adaptive_vs_dense_top1": {
+    "adaptive_better": 0,
+    "adaptive_worse": 0
+  }
+}

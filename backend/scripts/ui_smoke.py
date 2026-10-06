@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+import tempfile
 from pathlib import Path
 
 from playwright.sync_api import Page, expect, sync_playwright
@@ -136,8 +137,9 @@ def run(ui: str, shots: Path | None, browser_name: str, verbose: bool = False) -
         try:
             flow(page, ui, shots, browser)
         except Exception:
-            page.screenshot(path="smoke_failure.png")
-            print("FAILED at", page.url)
+            shot_path = Path(tempfile.gettempdir()) / "resolveiq_ui_smoke_failure.png"
+            page.screenshot(path=str(shot_path))
+            print("FAILED at", page.url, "- screenshot:", shot_path)
             print("visible text:", page.locator("main").inner_text()[-1800:].replace("\n", " | "))
             print("console / page errors so far:", *problems, sep="\n  ")
             raise

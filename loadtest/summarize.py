@@ -1,6 +1,6 @@
 """Turn the raw results of a suite into SUMMARY.md (tables only; every number is read from the run's summary.json).
 
-    python loadtest/summarize.py 2026-10-06
+    python loadtest/summarize.py 2026-10-06 [--latest]     # --latest also writes loadtest/results/latest_summary.json (read by the console and the README renderer)
 """
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ def load(suite: Path):
     return runs
 
 
-def main(suite_name: str) -> None:
+def main(suite_name: str, latest: bool = False) -> None:
     suite = REPO / "loadtest" / "results" / suite_name
     runs = load(suite)
     env = json.loads((suite / "environment.json").read_text(encoding="utf-8"))
@@ -80,7 +80,29 @@ def main(suite_name: str) -> None:
             out.append("")
     (suite / "SUMMARY.md").write_text("\n".join(out), encoding="utf-8")
     print(f"wrote {suite / 'SUMMARY.md'}")
+    if latest:
+        rows = []
+        for scen in sorted(runs, key=lambda x: ORDER.index(x) if x in ORDER else 99):
+            for name, s in sorted(runs[scen], key=lambda kv: kv[1]["meta"]["users"]):
+                if s["meta"].get("tracing"):
+                    continue
+                r, lat = s["requests"], s["latency_ms_ok"]
+                oc = s.get("outcome", {})
+                n_ok = r["ok"] or 1
+                rows.append({"scenario": scen, "users": s["meta"]["users"], "seconds": round(s["wall_seconds"]), "completed": r["completed"], "rps": round(s["throughput"]["ok_per_s"], 2),
+                             "p50": lat.get("p50"), "p95": lat.get("p95"), "p99": lat.get("p99"), "errors": pct(r["error_rate"]),
+                             "evidence_only": pct(oc.get("degraded", 0) / n_ok if r["ok"] else None), "abstained": pct(oc.get("abstained", 0) / n_ok if r["ok"] else None)})
+        doc = {"suite": suite_name, "commit": env.get("git_commit"), "dirty": bool(env.get("git_dirty")), "date": env.get("date"),
+               "description": f"Closed-loop Locust load test of one API process (suite {suite_name}): {env.get('cpu_name') or env.get('cpu')}, {env.get('ram_gb')} GB RAM, GPU {env.get('gpu')}, "
+                              f"shared by the LLM, NLI and embedding models; Postgres and Redis in Docker on the same machine. Full tables: loadtest/results/{suite_name}/SUMMARY.md.",
+               "caveat": "One machine, one API replica, synthetic users replaying the evaluation complaints; client and server compete for the same CPU and GPU. It describes this setup, not a deployed system, "
+                         "and says nothing about multiple replicas or a dedicated LLM tier. With a concurrency limit of 1 on the single local GPU, requests beyond the first are answered from evidence only "
+                         "(the 'evidence-only' share) rather than queued, which is the designed behaviour.",
+               "rows": rows}
+        out_path = REPO / "loadtest" / "results" / "latest_summary.json"
+        out_path.write_text(json.dumps(doc, indent=2), encoding="utf-8")
+        print(f"wrote {out_path}")
 
 
 if __name__ == "__main__":
-    main(sys.argv[1])
+    main(sys.argv[1], "--latest" in sys.argv[2:])

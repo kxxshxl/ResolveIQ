@@ -46,6 +46,19 @@
     {"path": "discovery.candidate_selection.novel_recall", "min": 0.75},
     {"path": "discovery.proposals.recovered_classes", "min": 3},
     {"path": "discovery.proposals.precision", "min": 0.5},
-    {"path": "discovery.after_acceptance.routed_correctly_after", "min": 0.4}
+    {"path": "discovery.after_acceptance.routed_correctly_after", "min": 0.4},
+
+    {"path": "adaptive.results.gold.ticket.adaptive.hit@1", "min": 0.86},
+    {"path": "adaptive.results.gold.ticket.adaptive.mrr", "min": 0.90},
+    {"path": "adaptive.results.blind.ticket.adaptive.hit@1", "min": 0.85},
+    {"path": "adaptive.results.gold.article.adaptive.hit@1", "min": 0.82},
+    {"path": "adaptive.paired_differences.gold.ticket.adaptive_minus_dense.mrr.mean_diff", "min": -0.02},
+    {"path": "adaptive.paired_differences.blind.ticket.adaptive_minus_dense.mrr.mean_diff", "min": -0.02},
+    {"path": "adaptive.paired_differences.gold.article.adaptive_minus_dense.mrr.mean_diff", "min": -0.04},
+    {"path": "adaptive.results.gold.ticket.adaptive.latency.p95_ms", "max": 25},
+
+    {"path": "clustering.sweep.1.vs_intent.purity", "min": 0.80},
+    {"path": "clustering.sweep.1.coverage", "min": 0.80},
+    {"path": "clustering.with_unseen_topics.recovered", "min": 2}
   ]
 }

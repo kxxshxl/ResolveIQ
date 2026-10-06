@@ -12,7 +12,7 @@ from pathlib import Path
 from app.core.config import REPO_ROOT
 
 FILES = {"latest": "data/eval/results/latest.json", "drift_demo": "data/eval/results/drift_demo.json", "pgvector_scale": "data/eval/results/pgvector_scale.json",
-         "db_query_plans": "data/eval/results/db_query_plans.json", "ingest_benchmark": "data/eval/results/ingest_benchmark.json", "load_test": "loadtest/results/latest_summary.json"}
+         "db_query_plans": "data/eval/results/db_query_plans.json", "failure_analysis": "data/eval/results/failure_analysis.json", "ingest_benchmark": "data/eval/results/ingest_benchmark.json", "load_test": "loadtest/results/latest_summary.json"}
 
 
 def _read(path: Path):

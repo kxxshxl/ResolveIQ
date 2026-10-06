@@ -44,7 +44,7 @@ jobs:
         env: {AFFECT_DEVICE: cpu}
         run: |
           python -m app.db.migrate && python scripts/seed.py
-          python -m app.evaluation.run --suites classification retrieval robustness discovery
+          python -m app.evaluation.run --suites classification retrieval robustness adaptive clustering discovery
       - name: Evaluation regression gate
         working-directory: backend
         run: python -m app.evaluation.gate

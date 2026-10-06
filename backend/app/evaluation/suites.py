@@ -264,7 +264,21 @@ def _e2e_metrics(runs: list[dict], corpus: Corpus) -> dict:
                      "generation_degraded": sum(1 for r in runs if r["resp"] and r["resp"].status == "degraded"),
                      "citation_validation_failures": sum(1 for r in runs if r["resp"] and r["resp"].status == "unreliable")},
         "tokens": None,
+        # every in-domain complaint that did not end in a correct resolution, with what the system did instead (evaluation queries are synthetic or hand-written: no customer data)
+        "failure_cases": [_failure_case(r, corpus) for r in ind if not correct(r)],
     }
+
+
+def _failure_case(r: dict, corpus: Corpus) -> dict:
+    resp, row = r["resp"], r["row"]
+    base = {"qid": row.get("qid"), "text": row["text"], "true_scenario": row.get("scenario_id"), "true_intent": row.get("intent")}
+    if not resp:
+        return {**base, "status": "error", "error": r["error"]}
+    cited = [c.source_id for c in resp.citations]
+    top = [i.source_id for i in resp.tickets[:3]]
+    return {**base, "status": resp.status, "predicted_intent": resp.classification.intent, "confidence": resp.confidence, "evidence_confidence": resp.evidence.confidence,
+            "cited": cited, "cited_scenarios": sorted({corpus.scenario_of.get(c, "?") for c in cited}), "top_ticket_scenarios": [corpus.scenario_of.get(t, "?") for t in top],
+            "true_scenario_in_top3": any(corpus.scenario_of.get(t) == row.get("scenario_id") for t in top)}
 
 
 async def rag_e2e_suite(svc: Services, sets: EvalSets, max_queries: int | None, want: set[str], judge_n: int = 0,

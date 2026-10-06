@@ -299,3 +299,48 @@ def test_unreachable_llm_is_recorded_as_error_without_breaking_the_response(trac
     assert any(e.name == "exception" for e in calls[0].events), "the failure is recorded on the span"
     failed_chain = [s for s in _by_name(spans)["llm.generate"] if s.status.status_code.name == "ERROR"]
     assert len(failed_chain) == 1
+
+
+# ---------------------------------------------------------------------------------------------- the console features are traced too
+def _dump(spans):
+    return json.dumps([{"name": s.name, "attrs": dict(s.attributes), "events": [(e.name, dict(e.attributes)) for e in s.events]} for s in spans], default=str)
+
+
+def test_adaptive_retrieval_decisions_are_span_events_without_text(traced):
+    c, exporter = traced
+    settings = c.app.state.services.settings
+    old = settings.adaptive_margin_ticket
+    settings.adaptive_margin_ticket = 9.0           # force the escalation so both rungs are visible
+    try:
+        _, spans = _resolve(traced, f"{COMPLAINT} {uuid.uuid4().hex}", strategy="adaptive")
+    finally:
+        settings.adaptive_margin_ticket = old
+    events = [(e.name, dict(e.attributes)) for s in spans for e in s.events if e.name == "retrieval.adaptive.decision"]
+    stages = [(a["resolveiq.adaptive.stage"], a["resolveiq.adaptive.action"]) for _, a in events if a["resolveiq.retrieval.kind"] == "ticket"]
+    assert stages == [("dense", "escalate"), ("hybrid", "stop")]
+    assert all("resolveiq.adaptive.value" in a for _, a in events) and SECRET not in _dump(spans)
+    gen = next(s for s in spans if s.name == "resolve.generate")
+    assert gen.attributes["resolveiq.prompt_version"]
+    assert next(s for s in spans if s.name == "resolve").attributes["resolveiq.corpus_version"] is not None
+
+
+def test_cases_lab_feedback_clusters_and_db_health_are_traced_without_customer_text(traced):
+    c, exporter = traced
+    r, _ = _resolve(traced, f"{COMPLAINT} {uuid.uuid4().hex}")
+    rid = r.json()["request_id"]
+    exporter.clear()
+    assert c.post(f"/api/v1/cases/{rid}/replay", json={}).status_code == 200
+    assert c.post("/api/v1/retrieval/compare", json={"complaint": f"router drops {SECRET}", "strategies": ["dense", "adaptive"]}).status_code == 200
+    assert c.post("/api/v1/feedback", json={"request_id": rid, "rating": "not_helpful", "comment": f"bad {SECRET}", "edited_steps": [f"step {SECRET}"]}).status_code == 201
+    assert c.get("/api/v1/clusters/recurring", params={"days": 3}).status_code == 200
+    assert c.get("/api/v1/quality/report").status_code == 200 and c.get("/api/v1/system/db").status_code == 200 and c.get("/api/v1/system/status").status_code == 200
+    spans = list(exporter.get_finished_spans())
+    names = _by_name(spans)
+    for expected in ("cases.replay", "lab.compare", "feedback.save", "feedback.analyze", "clusters.compute", "db.health", "resolve", "retrieval.search", "db.dense_search"):
+        assert expected in names, f"missing span {expected}; got {sorted(names)}"
+    replay = names["cases.replay"][0]
+    assert replay.attributes["resolveiq.deterministic"] is True and "resolveiq.replay.reproduced" in replay.attributes
+    assert names["lab.compare"][0].attributes["resolveiq.lab.strategies"] == 2 and names["feedback.save"][0].attributes["resolveiq.feedback.rating"] == "not_helpful"
+    assert "resolveiq.cluster.count" in names["clusters.compute"][0].attributes and names["db.health"][0].attributes["resolveiq.db.status"] in ("ok", "warn")
+    dump = _dump(spans)
+    assert SECRET not in dump and "restarted" not in dump and "router drops" not in dump

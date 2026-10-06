@@ -15,7 +15,7 @@ from app.evaluation.report import render_markdown
 from app.evaluation.runner import run_suites
 from app.services.container import Services
 
-ALL = ["classification", "retrieval", "robustness", "adaptive", "rag", "e2e", "evolving", "discovery"]
+ALL = ["classification", "retrieval", "robustness", "adaptive", "clustering", "rag", "e2e", "evolving", "discovery"]
 
 
 async def main() -> None:

@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import hmac
+import json
 import time
 import uuid
 from typing import Literal
@@ -145,18 +147,38 @@ async def deprecate_article(article_id: str, body: DeprecateBody, svc: Services 
 
 
 # ------------------------------------------------------------------ browse (pagination)
-@api.get("/tickets", summary="Paginated ticket listing")
+def _encode_cursor(row: dict) -> str:
+    return base64.urlsafe_b64encode(json.dumps([row["sort_key"].isoformat(), row["pk"]]).encode()).decode()
+
+
+def _decode_cursor(cursor: str) -> tuple[str, int]:
+    try:
+        key, pk = json.loads(base64.urlsafe_b64decode(cursor.encode()))
+        return str(key), int(pk)
+    except Exception as exc:  # noqa: BLE001
+        raise ValidationFailure("cursor is not valid (pass the next_cursor of the previous page)") from exc
+
+
+async def _page(svc: Services, kind: str, limit: int, offset: int, intent: str | None, cursor: str | None) -> dict:
+    if cursor is None:
+        rows, total = await svc.repo.list_docs(kind, limit, offset, intent)
+        return {"total": total, "limit": limit, "offset": offset, "items": rows}
+    rows = await svc.repo.list_docs_keyset(kind, limit, None if cursor == "start" else _decode_cursor(cursor), intent)
+    page = rows[:limit]
+    next_cursor = _encode_cursor(page[-1]) if len(rows) > limit and page else None
+    return {"limit": limit, "next_cursor": next_cursor, "items": [{k: v for k, v in r.items() if k not in ("pk", "sort_key")} for r in page]}
+
+
+@api.get("/tickets", summary="Paginated ticket listing (offset, or keyset with ?cursor= for stable, constant-cost deep paging)")
 async def list_tickets(limit: int = Query(20, ge=1, le=100), offset: int = Query(0, ge=0), intent: str | None = None,
-                       svc: Services = Depends(get_services)):
-    rows, total = await svc.repo.list_docs("ticket", limit, offset, intent)
-    return {"total": total, "limit": limit, "offset": offset, "items": rows}
+                       cursor: str | None = Query(None, description="'start' for the first keyset page, then each response's next_cursor"), svc: Services = Depends(get_services)):
+    return await _page(svc, "ticket", limit, offset, intent, cursor)
 
 
-@api.get("/articles", summary="Paginated KB article listing")
+@api.get("/articles", summary="Paginated KB article listing (offset, or keyset with ?cursor=)")
 async def list_articles(limit: int = Query(20, ge=1, le=100), offset: int = Query(0, ge=0), intent: str | None = None,
-                        svc: Services = Depends(get_services)):
-    rows, total = await svc.repo.list_docs("article", limit, offset, intent)
-    return {"total": total, "limit": limit, "offset": offset, "items": rows}
+                        cursor: str | None = Query(None), svc: Services = Depends(get_services)):
+    return await _page(svc, "article", limit, offset, intent, cursor)
 
 
 # ------------------------------------------------------------------ taxonomy
@@ -250,17 +272,9 @@ async def reject_proposal(proposal_id: str, body: RejectBody, svc: Services = De
 
 
 # ------------------------------------------------------------------ feedback / stats
-@api.post("/feedback", status_code=201, summary="Agent feedback on a resolution")
+@api.post("/feedback", status_code=201, summary="Agent feedback on a resolution: rating, reasons, rejected sources, corrected intent, edited steps")
 async def feedback(body: FeedbackIn, svc: Services = Depends(get_services)):
-    try:
-        uuid.UUID(body.request_id)
-    except ValueError as exc:
-        raise ValidationFailure("request_id must be a UUID") from exc
-    if not await svc.repo.request_exists(body.request_id):
-        raise NotFoundError("request_id not found")
-    if body.corrected_intent and not svc.taxonomy.current.has("intent", body.corrected_intent):
-        raise ValidationFailure(f"unknown intent '{body.corrected_intent}'")
-    return {"feedback_id": await svc.repo.save_feedback(body.request_id, body.rating, body.comment, body.corrected_intent)}
+    return await svc.quality.save(body)
 
 
 @api.get("/stats", summary="Corpus / taxonomy / provider overview")

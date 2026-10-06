@@ -80,6 +80,7 @@ class IngestResult(BaseModel):
     pii_redactions: dict[str, int] = Field(default_factory=dict)
     corpus_version: int
     embedding_ms: float
+    warnings: list[str] = Field(default_factory=list)   # e.g. instruction-like text found in the document (it is neutralised before any model sees it)
 
 
 class BatchIngestRequest(BaseModel):
@@ -134,6 +135,7 @@ class ValidationReport(BaseModel):
     grounded_ratio: float = 0.0
     citation_coverage: float = 0.0
     citations_emitted: int = 0                                   # raw ids the generator produced (before sanitising)
+    invented_details: list[str] = Field(default_factory=list)    # links, e-mail addresses, long numbers or amounts in a step that the cited evidence does not contain
     warnings: list[str] = Field(default_factory=list)
 
 

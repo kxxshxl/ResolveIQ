@@ -1,0 +1,236 @@
+{
+  "experiment": "SYNTHETIC pgvector scale experiment (not a production benchmark)",
+  "setup": {
+    "vectors": 100000,
+    "dimensions": 384,
+    "topics": 400,
+    "queries": 500,
+    "k": 10,
+    "seed": 7,
+    "hnsw": {
+      "m": 16,
+      "ef_construction": 64
+    },
+    "generate_s": 0.7,
+    "mean_within_topic_cosine": 0.553,
+    "mean_across_topic_cosine": -0.0,
+    "ground_truth_s": 1.1
+  },
+  "server": {
+    "postgres": "17.11 (Debian 17.11-1.pgdg12+2)",
+    "pgvector": "0.8.6",
+    "shared_buffers": "128MB",
+    "max_parallel_maintenance_workers": "2"
+  },
+  "load": {
+    "seconds": 11.6,
+    "rows_per_second": 8626
+  },
+  "index_build": {
+    "seconds": 22.4,
+    "maintenance_work_mem": "1GB",
+    "parallel_workers": 0,
+    "note": "serial build: the container's 64 MB /dev/shm cannot hold the shared memory a parallel build asks for, so this is a lower bound on build speed"
+  },
+  "storage": {
+    "table_mb": 156.5,
+    "hnsw_index_mb": 195.3,
+    "btree_topic_index_mb": 0.7,
+    "total_mb": 355.4,
+    "raw_vector_data_mb": 146.5,
+    "index_bytes_per_vector": 2048
+  },
+  "plan_uses_hnsw": true,
+  "search": {
+    "ef_search=10": {
+      "n": 500,
+      "p50_ms": 1.192,
+      "p95_ms": 1.593,
+      "p99_ms": 1.96,
+      "mean_ms": 1.231,
+      "max_ms": 2.978,
+      "recall@10": 0.781,
+      "min_recall": 0.0,
+      "top1_agreement": 0.788
+    },
+    "ef_search=20": {
+      "n": 500,
+      "p50_ms": 1.21,
+      "p95_ms": 1.549,
+      "p99_ms": 1.866,
+      "mean_ms": 1.25,
+      "max_ms": 3.468,
+      "recall@10": 0.8956,
+      "min_recall": 0.0,
+      "top1_agreement": 0.902
+    },
+    "ef_search=40": {
+      "n": 500,
+      "p50_ms": 1.299,
+      "p95_ms": 1.779,
+      "p99_ms": 2.134,
+      "mean_ms": 1.356,
+      "max_ms": 4.348,
+      "recall@10": 0.9682,
+      "min_recall": 0.0,
+      "top1_agreement": 0.97
+    },
+    "ef_search=100": {
+      "n": 500,
+      "p50_ms": 1.422,
+      "p95_ms": 1.976,
+      "p99_ms": 2.556,
+      "mean_ms": 1.494,
+      "max_ms": 4.18,
+      "recall@10": 0.9972,
+      "min_recall": 0.0,
+      "top1_agreement": 0.998
+    },
+    "ef_search=200": {
+      "n": 500,
+      "p50_ms": 1.611,
+      "p95_ms": 2.22,
+      "p99_ms": 2.791,
+      "mean_ms": 1.682,
+      "max_ms": 3.716,
+      "recall@10": 0.9994,
+      "min_recall": 0.9,
+      "top1_agreement": 1.0
+    }
+  },
+  "sanity": {
+    "self_query_returns_itself_at_rank_1": "197/200",
+    "results_sorted_by_similarity": "100/100",
+    "reported_similarity_matches_exact_dot_product": "100/100"
+  },
+  "filtered_search": {
+    "independent attribute, 5.0% of rows": {
+      "filter": "grp < 50",
+      "selectivity": 0.0495,
+      "matching_rows": 4955,
+      "iterative_scan=off": {
+        "n": 100,
+        "p50_ms": 1.456,
+        "p95_ms": 1.856,
+        "p99_ms": 2.278,
+        "mean_ms": 1.499,
+        "max_ms": 2.342,
+        "recall@10": 0.188,
+        "queries_returning_fewer_than_k": 100,
+        "plan": "hnsw index scan"
+      },
+      "iterative_scan=relaxed_order": {
+        "n": 100,
+        "p50_ms": 2.179,
+        "p95_ms": 3.84,
+        "p99_ms": 5.267,
+        "mean_ms": 2.395,
+        "max_ms": 5.487,
+        "recall@10": 0.982,
+        "queries_returning_fewer_than_k": 0,
+        "plan": "hnsw index scan"
+      }
+    },
+    "independent attribute, 0.5% of rows": {
+      "filter": "grp < 5",
+      "selectivity": 0.0048,
+      "matching_rows": 477,
+      "iterative_scan=off": {
+        "n": 100,
+        "p50_ms": 1.117,
+        "p95_ms": 1.551,
+        "p99_ms": 2.712,
+        "mean_ms": 1.195,
+        "max_ms": 3.701,
+        "recall@10": 1.0,
+        "queries_returning_fewer_than_k": 0,
+        "plan": "btree index"
+      },
+      "iterative_scan=relaxed_order": {
+        "n": 100,
+        "p50_ms": 1.02,
+        "p95_ms": 1.197,
+        "p99_ms": 1.253,
+        "mean_ms": 1.032,
+        "max_ms": 1.263,
+        "recall@10": 1.0,
+        "queries_returning_fewer_than_k": 0,
+        "plan": "btree index"
+      }
+    },
+    "correlated attribute, 5.0% of rows": {
+      "filter": "topic < 20",
+      "selectivity": 0.0499,
+      "matching_rows": 4993,
+      "iterative_scan=off": {
+        "n": 100,
+        "p50_ms": 1.233,
+        "p95_ms": 1.782,
+        "p99_ms": 2.88,
+        "mean_ms": 1.331,
+        "max_ms": 3.621,
+        "recall@10": 0.987,
+        "queries_returning_fewer_than_k": 1,
+        "plan": "hnsw index scan"
+      },
+      "iterative_scan=relaxed_order": {
+        "n": 100,
+        "p50_ms": 1.103,
+        "p95_ms": 1.508,
+        "p99_ms": 1.995,
+        "mean_ms": 1.161,
+        "max_ms": 2.368,
+        "recall@10": 0.997,
+        "queries_returning_fewer_than_k": 0,
+        "plan": "hnsw index scan"
+      }
+    },
+    "correlated attribute, 0.5% of rows": {
+      "filter": "topic < 2",
+      "selectivity": 0.0047,
+      "matching_rows": 474,
+      "iterative_scan=off": {
+        "n": 100,
+        "p50_ms": 0.986,
+        "p95_ms": 1.293,
+        "p99_ms": 1.722,
+        "mean_ms": 1.041,
+        "max_ms": 2.577,
+        "recall@10": 1.0,
+        "queries_returning_fewer_than_k": 0,
+        "plan": "btree index"
+      },
+      "iterative_scan=relaxed_order": {
+        "n": 100,
+        "p50_ms": 1.013,
+        "p95_ms": 1.162,
+        "p99_ms": 1.23,
+        "mean_ms": 1.028,
+        "max_ms": 2.35,
+        "recall@10": 1.0,
+        "queries_returning_fewer_than_k": 0,
+        "plan": "btree index"
+      }
+    }
+  },
+  "concurrency": {
+    "client_threads": 8,
+    "queries": 2000,
+    "wall_s": 0.68,
+    "queries_per_second": 2943.7,
+    "n": 2000,
+    "p50_ms": 2.484,
+    "p95_ms": 3.909,
+    "p99_ms": 4.728,
+    "mean_ms": 2.576,
+    "max_ms": 7.593,
+    "ef_search": 40
+  },
+  "caveats": [
+    "synthetic vectors (Gaussian mixture), no text",
+    "one Postgres container on a laptop, client and server share the machine",
+    "latencies include the client round trip",
+    "memory use was not measured; the HNSW index size is the lower bound on what must stay cached",
+    "not a production benchmark"
+  ]
+}

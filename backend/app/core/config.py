@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     rate_limit_per_minute: int = 120
     request_timeout_seconds: float = 60.0
     cors_origins: str = "*"
+    expose_api_docs: bool = False   # /docs, /redoc and /openapi.json are always on in dev; in production they stay off unless this is true
 
     # --- embeddings / reranker ---
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
@@ -44,7 +45,7 @@ class Settings(BaseSettings):
     reranker_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
     reranker_enabled: bool = True
     default_retrieval_strategy: str = "dense"  # chosen on validation evidence, see docs/evaluation.md
-    hnsw_ef_search: int = 40                   # pgvector recall/latency knob (40 = pgvector default); measured in docs/database.md
+    hnsw_ef_search: int = 100                  # pgvector recall/latency knob (pgvector default 40). Synthetic 100k-vector experiment: recall@10 0.968 -> 0.997 for +0.1 ms p50 (docs/database.md)
 
     # --- adaptive retrieval: start cheap (dense) and spend more only when the evidence looks weak; thresholds chosen on the validation split ---
     adaptive_margin_ticket: float = 0.0        # dense rank-1 vs rank-2 cosine gap below which a TICKET search counts as ambiguous and escalates. 0 = never: on the tuning queries

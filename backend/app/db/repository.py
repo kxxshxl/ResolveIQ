@@ -72,6 +72,10 @@ class Repository:
             cur = await conn.execute(sql, params)
             return await cur.fetchall()
 
+    async def fetch_one(self, sql: str, params: Any = None) -> dict:
+        rows = await self._fetch(sql, params)
+        return rows[0] if rows else {}
+
     async def _exec(self, sql: str, params: Any = None) -> None:
         async with self.pool.connection() as conn:
             await conn.execute(sql, params)
@@ -173,6 +177,36 @@ class Repository:
                     (row["id"], model, vec_literal(embedding)),
                 )
         return row["id"], row["created"]
+
+    @tracing.traced("db.bulk_upsert_tickets", attrs=lambda self, rows, embeddings, model, chunk=500: {"resolveiq.batch_size": len(rows)},
+                    result=lambda r: {"resolveiq.ingest.created": r[0], "resolveiq.ingest.updated": r[1]})
+    async def bulk_upsert_tickets(self, rows: list[dict], embeddings: Sequence[Sequence[float]], model: str, chunk: int = 500) -> tuple[int, int]:
+        """Upsert many tickets and their embeddings in ONE transaction using batched statements (executemany pipelines them over a single connection),
+        instead of one transaction and several round trips per ticket. Returns (created, updated). All-or-nothing: the caller falls back to per-row on failure."""
+        created = updated = 0
+        sql = """INSERT INTO tickets (ticket_id,complaint_text,intent,product,severity,sentiment,resolution_steps,resolution_summary,resolved_at,metadata,taxonomy_version,source)
+                   VALUES (%(ticket_id)s,%(complaint_text)s,%(intent)s,%(product)s,%(severity)s,%(sentiment)s,%(steps)s,%(resolution_summary)s,%(resolved_at)s,%(metadata)s,
+                           %(taxonomy_version)s,%(source)s)
+                   ON CONFLICT (ticket_id) DO UPDATE SET complaint_text=EXCLUDED.complaint_text, intent=EXCLUDED.intent, product=EXCLUDED.product, severity=EXCLUDED.severity,
+                     sentiment=EXCLUDED.sentiment, resolution_steps=EXCLUDED.resolution_steps, resolution_summary=EXCLUDED.resolution_summary, resolved_at=EXCLUDED.resolved_at,
+                     metadata=EXCLUDED.metadata, status='active'"""
+        async with self.pool.connection() as conn:
+            async with conn.transaction():
+                async with conn.cursor() as cur:
+                    for i in range(0, len(rows), chunk):
+                        part, vecs = rows[i:i + chunk], embeddings[i:i + chunk]
+                        ids = [r["ticket_id"] for r in part]
+                        await cur.execute("SELECT ticket_id FROM tickets WHERE ticket_id = ANY(%s)", (ids,))
+                        existing = {r["ticket_id"] for r in await cur.fetchall()}
+                        await cur.executemany(sql, [{**r, "steps": Jsonb(r["resolution_steps"]), "metadata": Jsonb(r.get("metadata", {}))} for r in part])
+                        await cur.execute("SELECT id, ticket_id FROM tickets WHERE ticket_id = ANY(%s)", (ids,))
+                        pk = {r["ticket_id"]: r["id"] for r in await cur.fetchall()}
+                        await cur.executemany(
+                            "INSERT INTO ticket_embeddings (ticket_pk, model, embedding) VALUES (%s,%s,%s::vector) ON CONFLICT (ticket_pk, model) DO UPDATE SET embedding = EXCLUDED.embedding",
+                            [(pk[r["ticket_id"]], model, vec_literal(v)) for r, v in zip(part, vecs)])
+                        updated += len(existing)
+                        created += len(set(ids) - existing)
+        return created, updated
 
     async def bulk_upsert(self, kind: str, rows: list[dict], embeddings: Sequence[Sequence[float]], model: str) -> int:
         n = 0
@@ -297,6 +331,23 @@ class Repository:
         total = (await self._fetch(f"SELECT count(*) AS n FROM {meta['table']} d {clause}", params))[0]["n"]
         return rows, int(total)
 
+    async def list_docs_keyset(self, kind: str, limit: int, cursor: tuple[str, int] | None, intent: str | None = None) -> list[dict]:
+        """Newest-first page that starts strictly after `cursor` = (sort key, id) of the last row seen. Unlike OFFSET, the cost of a page does not grow with how
+        deep it is, and rows inserted while paging cannot shift the window and repeat or skip documents. Returns limit + 1 rows so the caller can tell if there is more."""
+        meta = KINDS[kind]
+        key = "d.resolved_at" if kind == "ticket" else "d.updated_at"
+        params: dict[str, Any] = {"limit": limit + 1}
+        where = ["TRUE"]
+        if intent:
+            where.append(f"d.{meta['intent']} = %(intent)s")
+            params["intent"] = intent
+        if cursor:
+            where.append(f"({key}, d.id) < (%(k)s::timestamptz, %(i)s)")
+            params["k"], params["i"] = cursor
+        return await self._fetch(
+            f"SELECT {self._select_cols(kind)}, d.status, d.id AS pk, {key} AS sort_key FROM {meta['table']} d WHERE {' AND '.join(where)} ORDER BY {key} DESC, d.id DESC LIMIT %(limit)s",
+            params)
+
     async def ids_missing_embedding(self, kind: str, model: str) -> list[dict]:
         meta = KINDS[kind]
         text = "d.complaint_text" if kind == "ticket" else "d.title || '. ' || d.content"
@@ -331,11 +382,91 @@ class Repository:
     async def request_exists(self, request_id: str) -> bool:
         return bool(await self._fetch("SELECT 1 FROM resolution_requests WHERE request_id=%s", (request_id,)))
 
-    async def save_feedback(self, request_id: str, rating: str, comment: str | None, corrected_intent: str | None) -> int:
+    async def save_feedback(self, request_id: str, rating: str, comment: str | None, corrected_intent: str | None, reasons: Sequence[str] = (),
+                            rejected_sources: Sequence[str] = (), edited_steps: list[str] | None = None, provenance: dict | None = None) -> int:
         rows = await self._fetch(
-            "INSERT INTO feedback (request_id,rating,comment,corrected_intent) VALUES (%s,%s,%s,%s) RETURNING feedback_id",
-            (request_id, rating, comment, corrected_intent))
+            """INSERT INTO feedback (request_id,rating,comment,corrected_intent,reasons,rejected_sources,edited_steps,provenance)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s) RETURNING feedback_id""",
+            (request_id, rating, comment, corrected_intent, list(reasons), list(rejected_sources),
+             Jsonb(edited_steps) if edited_steps is not None else None, Jsonb(provenance) if provenance is not None else None))
         return rows[0]["feedback_id"]
+
+    # ------------------------------------------------------------- cases (resolution_requests as an audit/replay log)
+    async def list_cases(self, limit: int, offset: int, status: str | None = None, intent: str | None = None, rated: str | None = None) -> tuple[list[dict], int]:
+        where, params = ["TRUE"], {"limit": limit, "offset": offset}
+        if status:
+            where.append("r.status = %(status)s")
+            params["status"] = status
+        if intent:
+            where.append("r.classification->>'intent' = %(intent)s")
+            params["intent"] = intent
+        if rated == "none":
+            where.append("NOT EXISTS (SELECT 1 FROM feedback f WHERE f.request_id = r.request_id)")
+        elif rated in ("helpful", "not_helpful"):
+            where.append("EXISTS (SELECT 1 FROM feedback f WHERE f.request_id = r.request_id AND f.rating = %(rated)s)")
+            params["rated"] = rated
+        clause = " AND ".join(where)
+        rows = await self._fetch(
+            f"""SELECT r.request_id::text AS request_id, r.created_at, left(r.complaint, 200) AS complaint, r.status, r.confidence, r.latency_ms,
+                       r.classification->>'intent' AS intent, r.classification->>'product' AS product, r.provenance->>'generator' AS generator,
+                       r.provenance->>'prompt_version' AS prompt_version, r.trace IS NOT NULL AS has_trace,
+                       (SELECT f.rating FROM feedback f WHERE f.request_id = r.request_id ORDER BY f.created_at DESC LIMIT 1) AS rating
+                FROM resolution_requests r WHERE {clause} ORDER BY r.created_at DESC LIMIT %(limit)s OFFSET %(offset)s""", params)
+        total = (await self._fetch(f"SELECT count(*) AS n FROM resolution_requests r WHERE {clause}", params))[0]["n"]
+        return rows, int(total)
+
+    async def get_case(self, request_id: str) -> dict | None:
+        try:
+            uuid.UUID(request_id)
+        except ValueError:
+            return None
+        rows = await self._fetch(
+            """SELECT request_id::text AS request_id, trace_id, complaint, classification, retrieved, result, status, confidence, latency_ms, created_at,
+                      trace, provenance, embedding IS NOT NULL AS has_embedding FROM resolution_requests WHERE request_id = %s""", (request_id,))
+        if not rows:
+            return None
+        rows[0]["feedback"] = await self._fetch(
+            "SELECT feedback_id, rating, comment, corrected_intent, reasons, rejected_sources, edited_steps, created_at FROM feedback WHERE request_id = %s "
+            "ORDER BY created_at", (request_id,))
+        return rows[0]
+
+    async def get_request_context(self, request_id: str) -> dict | None:
+        """What feedback needs to know about the request it rates: the retrieved ids, the cited ids, the classification and the provenance."""
+        rows = await self._fetch(
+            "SELECT retrieved, classification, provenance, result->'citations' AS citations FROM resolution_requests WHERE request_id = %s", (request_id,))
+        return rows[0] if rows else None
+
+    # ------------------------------------------------------------- feedback analytics (bounded reads; aggregation is done in app/quality/analysis.py)
+    async def feedback_rows(self, days: int, limit: int = 5000) -> list[dict]:
+        return await self._fetch(
+            """SELECT f.feedback_id, f.rating, f.reasons, f.rejected_sources, f.corrected_intent, f.edited_steps IS NOT NULL AS edited, f.created_at,
+                      r.request_id::text AS request_id, r.status, r.classification->>'intent' AS intent, r.classification->>'product' AS product,
+                      r.retrieved, r.result->'citations' AS citations, r.result->'lineage'->'signals' AS signals, r.provenance
+               FROM feedback f JOIN resolution_requests r ON r.request_id = f.request_id
+               WHERE f.created_at > now() - make_interval(days => %s) ORDER BY f.created_at DESC LIMIT %s""", (days, limit))
+
+    async def request_rows_for_quality(self, days: int, limit: int = 20000) -> list[dict]:
+        return await self._fetch(
+            """SELECT status, classification->>'intent' AS intent, classification->>'product' AS product,
+                      result->'lineage'->'signals'->>'abstention_reason' AS abstention_reason, result->'validation' AS validation,
+                      (SELECT e->'detail'->>'fallback_reason' FROM jsonb_array_elements(coalesce(trace, '[]'::jsonb)) e WHERE e->>'name' = 'generate' LIMIT 1) AS fallback_reason,
+                      (result->'evidence'->>'confidence')::float AS evidence, (result->'resolution'->>'escalate')::boolean AS escalated
+               FROM resolution_requests WHERE created_at > now() - make_interval(days => %s) ORDER BY created_at DESC LIMIT %s""", (days, limit))
+
+    # ------------------------------------------------------------- recurring complaint clusters
+    async def recent_requests_with_embeddings(self, days: int, limit: int) -> list[dict]:
+        return await self._fetch(
+            """SELECT request_id::text AS request_id, complaint, created_at, status, classification->>'intent' AS intent, classification->>'product' AS product,
+                      classification->>'severity' AS severity, (result->'evidence'->>'confidence')::float AS evidence,
+                      embedding::real[] AS embedding, embedding_model
+               FROM resolution_requests WHERE created_at > now() - make_interval(days => %s) ORDER BY created_at DESC LIMIT %s""", (days, limit))
+
+    async def put_request_embeddings(self, pairs: list[tuple[str, Sequence[float]]], model: str) -> None:
+        async with self.pool.connection() as conn:
+            async with conn.transaction():
+                for rid, emb in pairs:
+                    await conn.execute("UPDATE resolution_requests SET embedding = %s::vector, embedding_model = %s WHERE request_id = %s AND embedding IS NULL",
+                                       (vec_literal(emb), model, rid))
 
     async def create_job(self, kind: str, payload: dict | None = None) -> str:
         job_id = str(uuid.uuid4())

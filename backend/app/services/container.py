@@ -10,9 +10,13 @@ from app.classification.pipeline import ComplaintClassifier
 from app.classification.taxonomy import TaxonomyService
 from app.core.config import Settings
 from app.db.repository import Repository
+from app.cases.service import CaseService
+from app.clusters.service import ClusterService
 from app.discovery.service import DiscoveryService
 from app.drift.service import DriftService
 from app.ingestion.pipeline import IngestionService
+from app.lab.service import LabService
+from app.quality.service import QualityService
 from app.rag.pipeline import ResolutionService
 from app.retrieval.reranker import CrossEncoderReranker
 from app.retrieval.service import RetrievalService
@@ -40,6 +44,10 @@ class Services:
     discovery: DiscoveryService
     affect: AffectModel
     drift: DriftService
+    cases: CaseService
+    lab: LabService
+    quality: QualityService
+    clusters: ClusterService
     models_ready: bool = False
     _taxonomy_sync: asyncio.Task | None = None
 
@@ -60,7 +68,8 @@ class Services:
         resolution = ResolutionService(repo, retrieval, classifier, taxonomy, llm, embedder, cache, settings)
         discovery = DiscoveryService(repo, retrieval, embedder, taxonomy, settings)
         drift = DriftService(repo, embedder, settings)
-        svc = cls(settings, repo, cache, embedder, reranker, taxonomy, retrieval, llm, classifier, ingestion, resolution, discovery, affect, drift)
+        svc = cls(settings, repo, cache, embedder, reranker, taxonomy, retrieval, llm, classifier, ingestion, resolution, discovery, affect, drift,
+                  CaseService(repo, resolution), LabService(repo, retrieval, settings), QualityService(repo, taxonomy), ClusterService(repo, embedder, settings))
         # load models off the event loop so startup does not block health probes' event loop
         await asyncio.to_thread(embedder.warmup)
         await asyncio.to_thread(reranker.warmup)

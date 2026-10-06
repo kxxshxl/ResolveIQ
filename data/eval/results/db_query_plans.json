@@ -1,0 +1,167 @@
+{
+  "setup": {
+    "requests": 20000,
+    "feedback": 50000,
+    "synthetic": true,
+    "note": "synthetic rows spread over 30 days; plans are for a database that has been used, not for the demo corpus",
+    "load_seconds": 0.9
+  },
+  "plans": [
+    {
+      "query": "case list: newest 25",
+      "execution_ms": 0.08,
+      "planning_ms": 0.23,
+      "rows": 25,
+      "shared_hit": 28,
+      "shared_read": 0,
+      "plan": [
+        "Limit",
+        "Index Scan on resolution_requests using resolution_requests_created_idx"
+      ]
+    },
+    {
+      "query": "case list: abstained, newest 25",
+      "execution_ms": 0.06,
+      "planning_ms": 0.07,
+      "rows": 25,
+      "shared_hit": 26,
+      "shared_read": 0,
+      "plan": [
+        "Limit",
+        "Index Scan on resolution_requests using resolution_requests_status_idx"
+      ]
+    },
+    {
+      "query": "cases of one intent, newest 25",
+      "execution_ms": 0.09,
+      "planning_ms": 0.07,
+      "rows": 25,
+      "shared_hit": 27,
+      "shared_read": 0,
+      "plan": [
+        "Limit",
+        "Index Scan on resolution_requests using resolution_requests_intent_idx"
+      ]
+    },
+    {
+      "query": "drift: last 24 h window",
+      "execution_ms": 0.01,
+      "planning_ms": 0.13,
+      "rows": 0,
+      "shared_hit": 2,
+      "shared_read": 0,
+      "plan": [
+        "Index Scan on resolution_requests using resolution_requests_created_idx"
+      ]
+    },
+    {
+      "query": "timeline: requests per day, 14 days",
+      "execution_ms": 3.62,
+      "planning_ms": 0.09,
+      "rows": 9,
+      "shared_hit": 930,
+      "shared_read": 0,
+      "plan": [
+        "Aggregate",
+        "Bitmap Heap Scan on resolution_requests",
+        "Bitmap Index Scan using resolution_requests_created_idx"
+      ]
+    },
+    {
+      "query": "intent mix per day, 14 days",
+      "execution_ms": 4.91,
+      "planning_ms": 0.19,
+      "rows": 81,
+      "shared_hit": 930,
+      "shared_read": 0,
+      "plan": [
+        "Aggregate",
+        "Bitmap Heap Scan on resolution_requests",
+        "Bitmap Index Scan using resolution_requests_created_idx"
+      ]
+    },
+    {
+      "query": "feedback joined to requests, 30 days",
+      "execution_ms": 16.69,
+      "planning_ms": 0.22,
+      "rows": 48041,
+      "shared_hit": 1665,
+      "shared_read": 0,
+      "plan": [
+        "Hash Join",
+        "Seq Scan on feedback",
+        "Hash",
+        "Seq Scan on resolution_requests"
+      ]
+    },
+    {
+      "query": "latest rating per case (list subquery)",
+      "execution_ms": 0.24,
+      "planning_ms": 0.07,
+      "rows": 25,
+      "shared_hit": 142,
+      "shared_read": 0,
+      "plan": [
+        "Subquery Scan",
+        "Limit",
+        "Index Scan on resolution_requests using resolution_requests_created_idx",
+        "Limit",
+        "Sort",
+        "Bitmap Heap Scan on feedback",
+        "Bitmap Index Scan using feedback_request_idx"
+      ]
+    },
+    {
+      "query": "embedding backfill candidates",
+      "execution_ms": 0.78,
+      "planning_ms": 0.06,
+      "rows": 800,
+      "shared_hit": 647,
+      "shared_read": 0,
+      "plan": [
+        "Limit",
+        "Sort",
+        "Bitmap Heap Scan on resolution_requests",
+        "Bitmap Index Scan using resolution_requests_unembedded_idx"
+      ]
+    },
+    {
+      "query": "ticket dense search (250 tickets: expect a scan)",
+      "execution_ms": 0.22,
+      "planning_ms": 0.23,
+      "rows": 5,
+      "shared_hit": 133,
+      "shared_read": 0,
+      "plan": [
+        "Limit",
+        "Limit",
+        "Seq Scan on ticket_embeddings",
+        "Sort",
+        "Hash Join",
+        "Seq Scan on ticket_embeddings",
+        "Hash",
+        "Seq Scan on tickets"
+      ]
+    },
+    {
+      "query": "last discovery job",
+      "execution_ms": 0.01,
+      "planning_ms": 0.1,
+      "rows": 1,
+      "shared_hit": 1,
+      "shared_read": 0,
+      "plan": [
+        "Aggregate",
+        "Seq Scan on jobs"
+      ]
+    }
+  ],
+  "foreign_key_index": {
+    "delete_300_requests_without_index_s": 0.404,
+    "delete_300_requests_with_index_s": 0.009,
+    "speedup": 43.9,
+    "feedback_rows": 50000,
+    "latest_rating_query_ms_with_index": 0.16,
+    "latest_rating_query_ms_without_index": 26.89
+  }
+}

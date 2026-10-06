@@ -133,6 +133,17 @@ class ResilientLLM:
     def available(self) -> bool:
         return bool(self.providers)
 
+    def status(self) -> list[dict]:
+        """Per provider: model, circuit breaker state and failure count, generation slots in use. Safe to expose (no endpoints, no keys)."""
+        out = []
+        for p in self.providers:
+            br = self.breakers[p.name]
+            slot = self.slots.get(p.name)
+            state = "closed" if br.opened_at is None else ("half-open" if time.monotonic() - br.opened_at >= br.cooldown_s else "open")
+            out.append({"name": p.name, "model": p.model, "circuit": state, "consecutive_failures": br.failures,
+                        "slots": {"limit": self.s.llm_max_concurrency, "in_use": (self.s.llm_max_concurrency - slot._value) if slot is not None else 0}})
+        return out
+
     @tracing.traced(
         "llm.generate",
         attrs=lambda self, system, user, *, json_mode=True, max_tokens=None, temperature=0.1, priority="normal", seed=None: {

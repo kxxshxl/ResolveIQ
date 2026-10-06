@@ -18,6 +18,20 @@ from app.services.embedding import EmbeddingService
 
 _ID = re.compile(r"[\[\]\s]")
 _TOK = re.compile(r"[a-z0-9]+")
+# Specifics an answer must never make up: where to go (links, e-mail), who to call or pay (long numbers), how much (amounts). Each one must appear in the evidence.
+_SPECIFIC = re.compile(r"https?://\S+|www\.\S+|[\w.+-]+@[\w-]+\.[\w.-]+|[£$€]\s?\d[\d,.]*|\b\d[\d\s().-]{6,}\d\b")
+
+
+def invented_specifics(step: str, units: list[str]) -> list[str]:
+    """Links, addresses, long numbers and amounts that appear in `step` but nowhere in the cited evidence (compared with spaces and punctuation ignored)."""
+    squash = lambda s: re.sub(r"[^a-z0-9£$€@.]", "", s.lower()).rstrip(".")  # noqa: E731
+    haystack = squash(" ".join(units))
+    out = []
+    for m in _SPECIFIC.finditer(step):
+        token = m.group(0).strip(" .,;:)")
+        if squash(token) and squash(token) not in haystack:
+            out.append(token[:60])
+    return out
 
 
 def normalize_id(raw: str, valid: dict[str, RetrievedItem]) -> str:
@@ -86,7 +100,7 @@ async def validate_resolution(resolution: Resolution, evidence: list[RetrievedIt
         mat = await embedder.embed_cached([s.text for s in cleaned] + texts)  # de-duplicated, and evidence sentences are cached across requests
         step_vecs, unit_vecs = mat[: len(cleaned)], mat[len(cleaned):]
 
-    unsupported, uncited = [], []
+    unsupported, uncited, invented = [], [], []
     for i, st in enumerate(cleaned):
         if not st.citations:
             uncited.append(i)
@@ -100,6 +114,10 @@ async def validate_resolution(resolution: Resolution, evidence: list[RetrievedIt
         cont = containment(st.text, units)
         st.grounding_score = round(max(cos, 0.0), 3)
         st.grounded = bool(cos >= settings.grounding_threshold or cont >= 0.75)
+        fake = invented_specifics(st.text, units)
+        if fake:   # a step that sounds right but sends the agent to a link, number or amount the evidence never mentioned is not grounded, however similar it reads
+            st.grounded = False
+            invented.extend(fake)
         if not st.grounded:
             unsupported.append(i)
 
@@ -116,6 +134,9 @@ async def validate_resolution(resolution: Resolution, evidence: list[RetrievedIt
     if unsupported:
         warnings.append(f"{len(unsupported)} step(s) are not supported by the text of the cited evidence")
         CITATION_FAILURES.labels("unsupported_step").inc(len(unsupported))
+    if invented:
+        warnings.append(f"a step contains a link, address, number or amount that the cited evidence does not contain: {sorted(set(invented))[:3]}")
+        CITATION_FAILURES.labels("invented_detail").inc(len(invented))
     ok = (not invalid) and (not uncited) and (n == 0 or grounded_ratio >= settings.min_grounded_ratio)
 
     by_src: dict[str, list[int]] = {}
@@ -128,7 +149,7 @@ async def validate_resolution(resolution: Resolution, evidence: list[RetrievedIt
     ]
     report = ValidationReport(valid=ok, invalid_citations=sorted(set(invalid)), uncited_steps=[i + 1 for i in uncited],
                               unsupported_steps=[i + 1 for i in unsupported], grounded_ratio=round(grounded_ratio, 3),
-                              citation_coverage=round(coverage, 3), warnings=warnings,
+                              citation_coverage=round(coverage, 3), warnings=warnings, invented_details=sorted(set(invented)),
                               citations_emitted=sum(len(st.citations) for st in resolution.steps))
     out = resolution.model_copy(update={"steps": cleaned})
     return out, citations, report

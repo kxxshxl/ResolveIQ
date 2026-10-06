@@ -26,6 +26,8 @@ _EVIDENCE_INJECTION = re.compile(
     re.I,
 )
 _ROLE_TOKENS = re.compile(r"(<\|[^|>]{1,30}\|>|\[/?(INST|SYS)\]|<<\s*/?SYS\s*>>|^\s*(system|assistant|user|human|ai)\s*:|```+)", re.I | re.M)
+# a role label inside reference text ("SYSTEM: ...", "ASSISTANT: ...") is an attempt to speak as someone else; upper case anywhere, or any case at the start of a sentence
+_ROLE_MARKER = re.compile(r"\b(SYSTEM|ASSISTANT|USER|HUMAN|DEVELOPER)\s*:|^\s*(system|assistant|user|human|developer)\s*:", re.M)
 _FORGED_ID = re.compile(r"\[\s*([A-Za-z]{2,6}[-_ ]?\d{1,8})\s*\]")
 _SENTENCE = re.compile(r"(?<=[.!?])\s+|\n+")
 INJECTION_REPLACEMENT = "[removed: instruction-like text]"
@@ -56,8 +58,7 @@ def neutralise_evidence(text: str) -> str:
         return ""
     s = unicodedata.normalize("NFKC", _INVISIBLE.sub("", text))
     s = _CTRL.sub(" ", html.unescape(_TAGS.sub(" ", s)))
-    s = _ROLE_TOKENS.sub(" ", s)
     s = _FORGED_ID.sub(r"(\1)", s)
     parts = _SENTENCE.split(s)
-    cleaned = [INJECTION_REPLACEMENT if (_EVIDENCE_INJECTION.search(p) or _INJECTION.search(p)) else p for p in parts]
+    cleaned = [INJECTION_REPLACEMENT if (_EVIDENCE_INJECTION.search(p) or _INJECTION.search(p) or _ROLE_MARKER.search(p)) else _ROLE_TOKENS.sub(" ", p) for p in parts]
     return _WS.sub(" ", " ".join(p for p in cleaned if p)).strip()

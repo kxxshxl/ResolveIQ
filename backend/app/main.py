@@ -13,10 +13,12 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from app.api.console import console
 from app.api.routes import api, ops
 from app.core.config import Settings, get_settings
 from app.core.errors import ResolveIQError
 from app.core.logging import configure_logging, trace_id_var
+from app.core.version import PIPELINE_VERSION
 from app.observability import tracing
 from app.observability.metrics import HTTP_LATENCY, HTTP_REQUESTS
 from app.services.container import Services
@@ -52,9 +54,11 @@ def create_app(settings: Settings | None = None, llm: ResilientLLM | None = None
         await app.state.services.close()
         tracing.flush()
 
+    hide_docs = settings.app_env == "production" and not settings.expose_api_docs
     app = FastAPI(
-        title="ResolveIQ - Telecom Ticket Resolution Assistant", version="1.0.0", lifespan=lifespan,
-        description="Semantic retrieval + grounded, cited resolutions for telecom support agents.", **_NO_NATIVE_TELEMETRY)
+        title="ResolveIQ - Telecom Ticket Resolution Assistant", version=PIPELINE_VERSION, lifespan=lifespan,
+        description="Semantic retrieval + grounded, cited resolutions for telecom support agents.",
+        **({"docs_url": None, "redoc_url": None, "openapi_url": None} if hide_docs else {}), **_NO_NATIVE_TELEMETRY)
     origins = [o.strip() for o in settings.cors_origins.split(",") if o.strip()]
     app.add_middleware(CORSMiddleware, allow_origins=origins, allow_methods=["*"], allow_headers=["*"])
 
@@ -108,6 +112,7 @@ def create_app(settings: Settings | None = None, llm: ResilientLLM | None = None
 
     app.include_router(ops)
     app.include_router(api)
+    app.include_router(console)
     tracing.configure(settings, role="api", span_exporter=span_exporter, app=app)  # no-op unless OTEL_TRACES_EXPORTER is set
     return app
 

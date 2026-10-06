@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 
 from app.api.security import get_services, rate_limit
 from app.core.errors import NotFoundError
+from app.evaluation.summary import load_results
 from app.models.schemas import Strategy
 from app.services.container import Services
 from app.system.health import database_health
@@ -89,6 +90,12 @@ async def quality_summary(days: int = Query(30, ge=1, le=365), svc: Services = D
 @console.get("/quality/report", summary="Deterministic improvement report from feedback (advisory: changes no model, label or document)")
 async def quality_report(days: int = Query(30, ge=1, le=365), svc: Services = Depends(get_services)):
     return await svc.quality.report(days)
+
+
+# ------------------------------------------------------------------ recorded evaluation results
+@console.get("/evaluation/results", summary="Recorded evaluation, drift-demo, scale-experiment and load-test results (files on disk, with their paths and write times)")
+async def evaluation_results():
+    return load_results()
 
 
 # ------------------------------------------------------------------ system

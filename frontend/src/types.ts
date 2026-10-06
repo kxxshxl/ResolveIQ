@@ -4,7 +4,7 @@ export interface Item {
   source_type: "ticket" | "article"; source_id: string; title: string; text: string; score: number; rank: number;
   retrieval_method: string; metadata: Record<string, unknown>; steps: string[]; resolution_summary?: string | null; scores: Record<string, number>;
 }
-export interface Step { text: string; citations: string[]; grounded: boolean | null; grounding_score: number | null }
+export interface Step { text: string; citations: string[]; grounded: boolean | null; grounding_score: number | null; support?: Record<string, number> }
 export interface Citation { source_type: string; source_id: string; title: string; score: number; cited_in_steps: number[] }
 export interface Validation { valid: boolean; invalid_citations: string[]; uncited_steps: number[]; unsupported_steps: number[]; grounded_ratio: number; citation_coverage: number; warnings: string[] }
 export interface Evidence { confidence: number; top_ticket_similarity: number; top_article_similarity: number; rerank_signal: number | null; consensus: number; sufficient: boolean; reason: string }

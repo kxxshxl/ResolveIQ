@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { getDriftHistory, getDriftStatus, getDriftTimeline, getJob, runDriftAnalysis } from "../api";
 import type { DriftAlert, DriftCluster, DriftDimension, DriftHistoryItem, DriftReport, DriftTimeline } from "../types";
-import { Skeleton, ToastBar, label, pct, type Toast } from "../ui";
+import { Skeleton, Tabs, ToastBar, label, pct, type Toast } from "../ui";
+import Recurring from "./Recurring";
 
 const DIMENSIONS: [string, string][] = [["intent", "Intent"], ["product", "Product"], ["severity", "Severity"], ["sentiment", "Sentiment"]];
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -149,6 +150,17 @@ function Timeline({ tl }: { tl: DriftTimeline }) {
 }
 
 export default function Drift() {
+  const [view, setView] = useState<"drift" | "recurring">("drift");
+  return (
+    <>
+      <div className="page-head"><div className="grow"><h1>Drift monitoring</h1><p>Is live traffic moving away from what the system was built on, and which complaints keep coming back? Distribution drift is tested statistically; recurring groups are linked to the class-discovery proposals that cover them.</p></div></div>
+      <Tabs variant="line" label="Drift views" value={view} onChange={setView} tabs={[{ id: "drift", name: "Distribution drift" }, { id: "recurring", name: "Recurring complaint clusters" }]} />
+      {view === "drift" ? <DriftAnalysis /> : <Recurring />}
+    </>
+  );
+}
+
+function DriftAnalysis() {
   const [report, setReport] = useState<DriftReport | null>(null);
   const [history, setHistory] = useState<DriftHistoryItem[]>([]);
   const [timeline, setTimeline] = useState<DriftTimeline | null>(null);
@@ -184,9 +196,9 @@ export default function Drift() {
       <section className="card">
         <div className="row wrap-start">
           <div className="grow">
-            <h2>Drift monitoring</h2>
+            <h2>Distribution drift tests</h2>
             <p className="muted small">
-              Compares the last day of requests with the previous two weeks. Every signal is a statistical test with a minimum effect size, so a quiet day does not alert and a small
+              Compares recent requests with a longer baseline just before them (DRIFT_WINDOW_HOURS and DRIFT_BASELINE_DAYS; the windows used are shown with each report). Every signal is a statistical test with a minimum effect size, so a quiet period does not alert and a small
               wobble in a large window does not either. Nothing here changes the taxonomy: new topics become proposals that a person reviews.
             </p>
           </div>

@@ -274,10 +274,46 @@ def failures(res: dict, detail: bool) -> list[str]:
     return out
 
 
+def headline(res: dict) -> list[str]:
+    ad = g(res, "latest", "adaptive", "results", "gold", "ticket", default={})
+    cl = g(res, "latest", "classification", "strategies", default={})
+    e2e = g(res, "latest", "e2e", default={})
+    rag_p = g(res, "latest", "rag", "primary", default={})
+    sc = g(res, "pgvector_scale", default={})
+    ds = g(res, "drift_demo", "scenarios", default={})
+    ctrl = g(res, "drift_demo", "control", default=[])
+    ld = {(r["scenario"], r["users"]): r for r in g(res, "load_test", "rows", default=[])}
+    out = []
+    if ad.get("dense"):
+        out.append(f"* **Semantic retrieval beats keyword search** on hand-written complaints: Hit@1 {f(ad['dense']['hit@1'])} (dense) versus {f(ad['lexical']['hit@1'])} (Postgres full-text) and {f(ad['bm25']['hit@1'])} (BM25).")
+    b, a = g(cl, "ensemble_legacy", "blind"), g(cl, "ensemble", "blind")
+    if a and b:
+        out.append(f"* **Severity and sentiment** (blind hand-written set): accuracy {f(g(b, 'severity', 'accuracy'))} to {f(g(a, 'severity', 'accuracy'))} and {f(g(b, 'sentiment', 'accuracy'))} to {f(g(a, 'sentiment', 'accuracy'))} with the NLI cue model; intent {f(g(a, 'intent', 'accuracy'))}.")
+    if e2e.get("in_domain"):
+        out.append(f"* **End to end** ({e2e['in_domain']['n']} in-domain, {e2e['out_of_domain']['n']} out-of-domain complaints): {pc(e2e['in_domain']['correct_resolution_rate'])} resolved with a source from the right root cause, "
+                   f"{pc(e2e['out_of_domain']['correct_abstention_rate'])} of out-of-domain complaints abstained, median latency {ms(g(e2e, 'latency_total', 'p50_ms'))}.")
+    if rag_p:
+        out.append(f"* **Grounding:** citation validity {f(rag_p.get('citation_validity'))}, step faithfulness {f(rag_p.get('step_faithfulness'), 3)} (lexical-containment proxy), citation precision against the right root cause {f(rag_p.get('citation_precision_vs_gold'))} (evidence-only baseline {f(g(res, 'latest', 'rag', 'extractive_no_llm', 'citation_precision_vs_gold'))}).")
+    d = g(res, "latest", "adaptive", "paired_differences", "gold", "ticket", "adaptive_minus_dense", "mrr", "mean_diff")
+    if d is not None:
+        out.append(f"* **Adaptive retrieval matches dense retrieval, it does not beat it** (MRR difference {d:+.3f} on gold tickets, interval includes zero on every held-out split). It is shipped as a bounded, observable option.")
+    if ctrl and ds.get("intent_shift_40") and ds.get("new_topic_10"):
+        i40, n10, n4, n6 = ds["intent_shift_40"], ds["new_topic_10"], ds.get("new_topic_4", {}), ds.get("new_topic_6", {})
+        out.append(f"* **Drift detection** (injection demo): {pc(ctrl[0]['false_alarm_rate'], 1)} false alarms with no change; \"{i40['description']}\" found in {i40['detected']} of {i40['trials']} trials; "
+                   f"a new topic with 10 of 100 recent complaints in {n10['detected']} of {n10['trials']}, with 4 and 6 complaints in {n4.get('detected')} and {n6.get('detected')} of {n4.get('trials')} (the blind spot is stated in the doc).")
+    e = sc.get("search", {}).get("ef_search=100")
+    if e:
+        out.append(f"* **Database:** 100,000 synthetic 384-d vectors, HNSW: recall@10 {f(e['recall@10'], 3)}, p99 {e['p99_ms']} ms, {sc['storage']['total_mb']:.0f} MB; batched ingestion {g(res, 'ingest_benchmark', 'speedup')}x faster than per-row transactions.")
+    c1, c25, l1 = ld.get(("no_llm", 1)), ld.get(("no_llm", 25)), ld.get(("llm", 1))
+    if c1 and c25 and l1:
+        out.append(f"* **Load (one API process, one laptop):** {c1['rps']} req/s without the LLM at 1 user, {c25['rps']} at 25 users (CPU-bound; errors {c25['errors']}); with the LLM one user gets full answers at {l1['rps']} req/s, and extra concurrent users are served from evidence only rather than queued.")
+    return (["**At a glance**", ""] + out + [""]) if out else []
+
+
 def render(kind: str, res: dict | None = None) -> str:
     res = res if res is not None else load_results()
     detail = kind == "evaluation"
-    parts = [run_info(res), retrieval(res, detail), adaptive(res, detail), classification(res, detail)]
+    parts = [run_info(res)] + ([headline(res)] if not detail else []) + [retrieval(res, detail), adaptive(res, detail), classification(res, detail)]
     if detail:
         parts.append(robustness(res))
     parts += [rag(res), clustering(res, detail), evolving_and_discovery(res, detail), drift(res, detail), failures(res, detail), scale(res, detail), load(res, detail)]

@@ -4,7 +4,7 @@ How ResolveIQ notices that live traffic is moving away from what the system was 
 hands new topics to the existing taxonomy-discovery workflow. Lightweight by design: no model is retrained and nothing in the taxonomy changes
 without a human accepting a proposal.
 
-![Drift monitoring tab with a detected new topic](screenshots/drift-monitoring.png)
+![Drift monitoring tab with a detected new topic](screenshots/console-drift.png)
 
 *The screenshot is real UI output, but the traffic is synthetic: `scripts/seed_drift_traffic.py` placed 170 labelled complaints 2 to 12 days back, 70 more in the last
 day, and 25 invented smart-home-hub complaints (all abstained) in the last day, in a scratch database.*

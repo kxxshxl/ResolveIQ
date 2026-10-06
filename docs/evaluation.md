@@ -5,104 +5,262 @@ raw JSON: `data/eval/results/latest.json`; the run recorded **before** this roun
 tuning log: `data/eval/results/tuning.txt`; embedding comparison: `data/eval/results/embedding_experiment.txt`.
 Data and splits: [`dataset.md`](dataset.md).
 
-Reproduce (RTX 4070 laptop, Ollama with `qwen3:4b-instruct`, seeded database):
+Reproduce (RTX 4070 laptop, Ollama with `qwen3:4b-instruct`, seeded database). The whole recorded run below took about 15 minutes:
 
 ```
-python -m app.evaluation.run --suites classification retrieval robustness evolving discovery   # ~4 min, no LLM
-python -m app.evaluation.run --suites rag e2e --judge 20 --alt-openai-model qwen3:4b-instruct  # ~10 min, needs Ollama
-python -m app.evaluation.gate                                                                   # regression gate (CI)
+python -m app.evaluation.run --judge 20                  # every suite: classification, retrieval, robustness, adaptive, clustering, rag, e2e, evolving, discovery
+python -m app.evaluation.run --suites classification retrieval robustness adaptive clustering discovery   # the LLM-free suites (what CI runs)
+python -m app.evaluation.gate                            # regression gate against data/eval/thresholds.json
+python backend/scripts/render_readme_metrics.py          # regenerate the tables below and in the README from the result files
+python -m app.evaluation.drift_demo                      # drift detection on injected scenarios (no database)
 ```
+
+**Every table in the "Recorded results" section is generated** by `render_readme_metrics.py` from `data/eval/results/*.json` and `loadtest/results/latest_summary.json`; a test
+(`tests/test_readme_consistency.py`) fails when the text and the files disagree. The prose around it states no result that is not in those tables, except where it says where the number comes from.
 
 ## Method
 
 | Subsystem | Metrics | Queries | Notes |
 |---|---|---|---|
 | Classification | accuracy, macro P/R/F1 per dimension, confidence calibration | `test` (100, templated), `gold` (101 hand-written), `blind` (50 hand-written, written after the affect model was frozen) | strategies compared: rules, kNN+prototypes, `ensemble_legacy` (rules+kNN for every dimension = before), `ensemble` (shipped: + NLI affect model) |
-| Retrieval | P@K, Recall@K, Hit@K, MRR, nDCG@K (K=1,3,5,10), latency p50/p95 | `test`, `gold`, `blind`; tickets and articles | lexical (Postgres FTS), BM25 (in-memory, eval-only, keeps the keyword baseline fair), dense, hybrid, hybrid+rerank |
+| Retrieval | P@K, Recall@K, Hit@K, MRR, nDCG@K (K=1,3,5,10), latency p50/p95 | `test`, `gold`, `blind`; tickets and articles | lexical (Postgres FTS), BM25 (in-memory, eval-only, keeps the keyword baseline fair), dense, hybrid, hybrid+rerank, adaptive |
 | Robustness | the above under deterministic perturbations | `gold` + `blind` (151) | typos, no punctuation / lower-case, signature + unrelated asides, truncation to 60%, ALL CAPS |
 | Generation / RAG | step faithfulness and hallucination (lexical containment in *all* evidence), citation validity, citation precision vs gold scenario, citation coverage, gold-step recall, answer relevance, optional LLM judge | 40 test + 101 gold, real LLM | variants: Qwen3-4B via the native Ollama provider, via the OpenAI-compatible provider, evidence-only (no LLM) |
 | End-to-end | successful / correct resolution rate, abstention (false and correct), latency, failures | 141 in-domain + 12 out-of-domain | "correct" = resolved **and** cites a source from the right scenario |
 | Evolving data | Hit@K / MRR / intent accuracy before vs after runtime ingestion | 12 queries, 2 new intents | no restart; cleaned up afterwards |
 | Class discovery | candidate recall, cluster purity per new class, proposal precision, routing after acceptance | 21 complaints from 3 never-seen classes mixed with 251 known | parameters tuned on a different stream (eSIM + roaming + validation queries); accept step temporarily adds labels and removes them |
+| Adaptive retrieval | the retrieval metrics per strategy, share of queries stopping at each rung, paired-bootstrap difference to dense (95% interval), ablations | thresholds chosen on `val` + `test`; judged on `gold` and `blind` only | see "Adaptive retrieval" below |
+| Recurring clusters | purity against intent and against root cause, adjusted Rand index, root causes recovered, with and without never-seen classes mixed in | all 301 labelled hand-written and held-out complaints, a sweep of the cosine distance | uses the stored query embeddings, as in production |
+| Drift detection | false-alarm rate with no change, detection rate per injected change, 30 seeded trials per scenario | synthetic traffic drawn from the labelled complaints | `python -m app.evaluation.drift_demo`; method and limits in [`drift.md`](drift.md) |
 
-## Headline results
 
-**Semantic vs keyword retrieval (tickets, held-out templated paraphrases `test`, n=100):**
+## Recorded results
 
-| strategy | Hit@1 | Hit@5 | MRR | nDCG@10 | P@5 |
-|---|---|---|---|---|---|
-| lexical (Postgres FTS) | 0.150 | 0.450 | 0.280 | 0.133 | 0.146 |
-| BM25 (in-memory) | 0.280 | 0.540 | 0.403 | 0.195 | 0.212 |
-| **dense (pgvector)** | **0.660** | **0.930** | **0.774** | **0.492** | **0.558** |
-| hybrid (weighted RRF) | 0.580 | 0.910 | 0.721 | 0.421 | 0.418 |
-| hybrid + cross-encoder | 0.570 | 0.900 | 0.715 | 0.421 | 0.422 |
+<!-- METRICS:START (generated by backend/scripts/render_readme_metrics.py; do not edit by hand) -->
 
-**On hand-written complaints** (Hit@1 / Hit@5 / MRR, tickets): the gap between semantic and keyword search is smaller than on the
-adversarial `test` set but still large, and it holds on text written after everything was frozen.
+Recorded on the final code (suites were run on 2026-10-06; the newest write is `2026-10-06T16:17:04+00:00`): 250 tickets, 25 active articles (+ 1 retired); embedding `sentence-transformers/all-MiniLM-L6-v2`, reranker `cross-encoder/ms-marco-MiniLM-L-6-v2`, LLM `ollama:qwen3:4b-instruct`. Query sets: val 50, test 100, gold 101, blind 50, ood 12, evolving 12.
 
-| split | lexical | BM25 | dense | hybrid | hybrid + rerank |
-|---|---|---|---|---|---|
-| gold (101) | .66 / .90 / .76 | .75 / .93 / .82 | **.91 / .98 / .94** | .91 / .98 / .93 | .91 / .98 / .93 |
-| blind (50) | .58 / .88 / .70 | .66 / .92 / .76 | **.90 / .98 / .94** | .80 / .96 / .87 | .82 / .96 / .88 |
+**held-out paraphrases (templated), tickets** (n=100)
 
-KB articles (Hit@1): dense .74 / .88 / .90 on test / gold / blind versus lexical .37 / .65 / .70; on **blind articles hybrid wins** (.94 vs .90).
+| strategy | Hit@1 | Hit@5 | MRR | nDCG@10 | p50 | p95 |
+|---|---:|---:|---:|---:|---:|---:|
+| keyword (Postgres FTS) | 0.15 | 0.45 | 0.28 | 0.13 | 3.8 ms | 5.2 ms |
+| keyword (BM25, in memory) | 0.28 | 0.54 | 0.40 | 0.20 | 1.1 ms | 1.2 ms |
+| dense (pgvector) | **0.66** | **0.93** | **0.77** | **0.49** | 1.3 ms | 1.5 ms |
+| hybrid (RRF) | 0.58 | 0.91 | 0.72 | 0.42 | 5.7 ms | 6.8 ms |
+| hybrid + cross-encoder | 0.57 | 0.90 | 0.71 | 0.42 | 15.7 ms | 17.4 ms |
+| adaptive | **0.66** | **0.93** | **0.77** | **0.49** | 1.4 ms | 1.6 ms |
 
-**Classification** (accuracy). `ensemble_legacy` = before; `ensemble` = shipped. The legacy rules reach 1.00 / 0.98 on the templated `test`
-set only because their lexicon and the generator share vocabulary (circular); every hand-written split shows the real picture.
+**hand-written gold, tickets** (n=101)
 
-| split | strategy | intent | product | severity | sentiment |
-|---|---|---|---|---|---|
-| test (100) | legacy | 0.85 | 0.89 | 1.00 (circular) | 0.98 (circular) |
+| strategy | Hit@1 | Hit@5 | MRR | nDCG@10 | p50 | p95 |
+|---|---:|---:|---:|---:|---:|---:|
+| keyword (Postgres FTS) | 0.66 | 0.90 | 0.76 | 0.46 | 2.9 ms | 3.9 ms |
+| keyword (BM25, in memory) | 0.75 | 0.93 | 0.82 | 0.50 | 0.9 ms | 1.0 ms |
+| dense (pgvector) | **0.91** | **0.98** | **0.94** | **0.65** | 1.1 ms | 1.3 ms |
+| hybrid (RRF) | **0.91** | **0.98** | 0.93 | 0.63 | 4.6 ms | 5.9 ms |
+| hybrid + cross-encoder | **0.91** | **0.98** | 0.93 | 0.64 | 14.3 ms | 16.0 ms |
+| adaptive | **0.91** | **0.98** | **0.94** | **0.65** | 1.4 ms | 1.6 ms |
+
+**hand-written blind, tickets** (n=50)
+
+| strategy | Hit@1 | Hit@5 | MRR | nDCG@10 | p50 | p95 |
+|---|---:|---:|---:|---:|---:|---:|
+| keyword (Postgres FTS) | 0.58 | 0.88 | 0.70 | 0.41 | 3.0 ms | 4.2 ms |
+| keyword (BM25, in memory) | 0.66 | 0.92 | 0.76 | 0.50 | 1.0 ms | 1.2 ms |
+| dense (pgvector) | **0.90** | **0.98** | **0.94** | **0.65** | 1.2 ms | 1.5 ms |
+| hybrid (RRF) | 0.80 | 0.96 | 0.87 | 0.60 | 5.0 ms | 6.6 ms |
+| hybrid + cross-encoder | 0.82 | 0.96 | 0.88 | 0.61 | 14.3 ms | 16.6 ms |
+| adaptive | **0.90** | **0.98** | **0.94** | **0.65** | 1.4 ms | 1.5 ms |
+
+**KB articles, hand-written gold** (n=101)
+
+| strategy | Hit@1 | Hit@3 | MRR |
+|---|---:|---:|---:|
+| keyword (Postgres FTS) | 0.65 | 0.81 | 0.75 |
+| keyword (BM25, in memory) | 0.66 | 0.79 | 0.75 |
+| dense (pgvector) | **0.88** | 0.96 | 0.93 |
+| hybrid (RRF) | **0.88** | 0.96 | **0.93** |
+| hybrid + cross-encoder | 0.86 | **0.97** | 0.92 |
+| adaptive | 0.86 | 0.94 | 0.91 |
+
+**Adaptive retrieval** (margins: tickets 0.0, articles 0.0181; rerank rung off, MMR off; chosen on val + test (150 templated queries), judged on gold, blind). Share of queries that stopped at each rung, and the paired-bootstrap difference to dense retrieval (MRR, 95% interval):
+
+| split | stopped at dense | at hybrid | at rerank | adaptive minus dense | queries adaptive better / worse |
+|---|---:|---:|---:|---:|---:|
+| gold tickets | 100% | 0% | 0% | +0.000 (+0.000 to +0.000) | 0 / 0 |
+| gold articles | 92% | 8% | 0% | -0.014 (-0.037 to +0.001) | 0 / 2 |
+| blind tickets | 100% | 0% | 0% | +0.000 (+0.000 to +0.000) | 0 / 0 |
+| blind articles | 90% | 10% | 0% | +0.012 (+0.000 to +0.033) | 1 / 0 |
+
+**Classification accuracy** (`gold` = hand-written, `blind` = hand-written after the affect model was frozen; `before` = rules + kNN for every dimension):
+
+| split | classifier | intent | product | severity | sentiment |
+|---|---|---:|---:|---:|---:|
+| test (100) | before | 0.85 | 0.89 | 1.00 | 0.98 |
 | test (100) | shipped | 0.85 | 0.89 | 0.72 | 0.85 |
-| gold (101) | legacy | 0.95 | 0.98 | 0.48 | 0.39 |
-| gold (101) | **shipped** | 0.95 | 0.98 | **0.65** | **0.66** |
-| blind (50) | legacy | 0.96 | 0.92 | 0.48 | 0.48 |
-| blind (50) | **shipped** | 0.96 | 0.92 | **0.64** | **0.78** |
+| gold (101) | before | 0.95 | 0.98 | 0.48 | 0.39 |
+| gold (101) | shipped | 0.95 | 0.98 | 0.65 | 0.66 |
+| blind (50) | before | 0.96 | 0.92 | 0.48 | 0.48 |
+| blind (50) | shipped | 0.96 | 0.92 | 0.64 | 0.78 |
 
-Macro-F1 on blind: severity 0.35 → 0.58, sentiment 0.48 → 0.76. Severity is within one ordinal level for ~98% of gold queries.
-Confidence is informative (on `test`): mean confidence when right vs wrong is 0.75 vs 0.62 (severity) and 0.81 vs 0.63 (sentiment).
+The `test` rows are templated text that shares its vocabulary with the generator, so the `before` severity and sentiment scores there are circular; the hand-written splits are the honest ones.
 
-**Robustness** (gold + blind, n=151; ensemble classifier, dense retrieval):
+**Robustness** (151 hand-written queries under deterministic perturbations):
 
 | perturbation | intent | severity | sentiment | ticket Hit@1 | ticket Hit@5 | article Hit@3 |
-|---|---|---|---|---|---|---|
-| clean | 0.940 | 0.649 | 0.702 | 0.907 | 0.980 | 0.967 |
-| typos | 0.934 | 0.649 | 0.702 | 0.861 | 0.967 | 0.960 |
-| no punctuation, lower-case | 0.921 | 0.556 | 0.589 | 0.874 | 0.980 | 0.967 |
-| signature + unrelated aside | 0.947 | 0.715 | 0.649 | 0.795 | 0.980 | 0.960 |
-| truncated to 60% | 0.907 | 0.464 | 0.391 | 0.848 | 0.974 | 0.934 |
-| ALL CAPS | 0.940 | 0.642 | 0.768 | 0.907 | 0.980 | 0.967 |
+|---|---:|---:|---:|---:|---:|---:|
+| clean | 0.94 | 0.65 | 0.70 | 0.91 | 0.98 | 0.97 |
+| typos | 0.95 | 0.65 | 0.70 | 0.86 | 0.97 | 0.96 |
+| no punctuation lowercase | 0.92 | 0.56 | 0.59 | 0.87 | 0.98 | 0.97 |
+| noise and signature | 0.95 | 0.72 | 0.65 | 0.79 | 0.98 | 0.96 |
+| truncated 60pct | 0.91 | 0.46 | 0.39 | 0.85 | 0.97 | 0.93 |
+| all caps | 0.94 | 0.64 | 0.77 | 0.91 | 0.98 | 0.97 |
 
-Retrieval and intent are robust (Hit@5 never drops below 0.967). Severity and sentiment depend on cue words and punctuation: they lose 9-31 points when
-the text is lower-cased without punctuation or truncated, which is the main remaining weakness for pasted-from-chat input.
+**Grounded generation** (ollama:qwen3:4b-instruct, 137 answers; evidence-only baseline 38 answers):
 
-**Emerging-class discovery** (3 never-seen classes, 7 complaints each in the stream, mixed with 251 known complaints):
+| metric | LLM | evidence only |
+|---|---:|---:|
+| step faithfulness | 1.0000 | 1.0000 |
+| response hallucination rate | 0.0% | 0.0% |
+| citation validity | 1.00 | 1.00 |
+| citation coverage | 1.00 | 1.00 |
+| citation precision vs gold scenario | 0.92 | 0.59 |
+| gold-step recall | 0.92 | 0.76 |
+| LLM judge, 20 answers (1 to 5; a qwen3:4b-instruct self-judge) | faithfulness 4.9, relevance 5.0 | n/a |
 
-| stage | result |
-|---|---|
-| novel complaints flagged as candidates (evidence confidence < 0.80) | 18 / 21 = **0.86**; the abstention gate alone catches **0.24** |
-| known complaints wrongly flagged | 89 / 251 = 0.36 (a deliberately noisy filter; clustering removes most of it) |
-| proposals produced | 5 (all `new_class`) |
-| classes recovered (cluster purity >= 0.8) | **3 / 3**, each at purity 1.0; coverage of the class 0.86 / 0.86 / 0.57 |
-| proposal precision | 0.60 (the 2 spurious proposals were mixed *known* topics: billing/plan wording, and genuine outage complaints that scored low on evidence) |
-| keywords of recovered clusters | `number, transfer, old, network, code` · `app, says, update, subscription isn't, sync picture` · `voicemail, work missing, visual, ...` |
-| held-out complaints routed to the right class after accepting the proposals | 0.00 → **0.56**, with **zero** resolved tickets for those classes |
+**End to end** (141 in-domain + 12 out-of-domain complaints through the full pipeline):
 
-Live check (separate API and worker processes, real LLM): 30 complaints from the three classes were sent to `/resolve`; **22 were
-answered** from adjacent classes and only 8 abstained; the queued discovery job ran on the worker (attempt 1, 0.16 s) and produced three
-proposals (`number_*`, `app_*`, `voicemail_*`). This is why discovery exists: the abstention gate is not a novelty detector.
+| metric | value |
+|---|---:|
+| resolved | 96% |
+| resolved with a source from the right scenario | 93% |
+| false abstention (in-domain) | 2.8% |
+| out-of-domain complaints abstained | 100% |
+| pipeline errors | 0 |
+| latency p50 / p95 (LLM generation dominates) | 4,902 ms / 6,149 ms |
 
-**RAG (Qwen3-4B-instruct, evidence = top 3 tickets + 2 articles, 137 answered requests):** step faithfulness 0.9985, citation validity 1.000,
-citation coverage 1.000, citation precision vs gold 0.903, gold-step recall 0.923, answer relevance 0.926; LLM self-judge 4.9 / 4.95 of 5.
-Evidence-only baseline (no LLM, n=38): faithfulness 1.000 but citation precision 0.591 and gold-step recall 0.763. OpenAI-compatible
-provider pointed at Ollama: 0.995 / 0.797 / 0.858 (n=38), i.e. the provider abstraction behaves the same.
+**Recurring-complaint clusters** (301 labelled complaints from 25 root causes in 9 intents; average linkage on the stored query embeddings). Purity is the share of complaints in a cluster that agree with the cluster's majority label; a root cause counts as recovered when one cluster is at least 70% that cause and holds at least half of its complaints. The application uses distance 0.55.
 
-**End-to-end (153 requests):** 97.2% in-domain resolved, **92.9% correct** (resolved *and* cites a source from the right scenario),
-2.8% false abstention, 0 unreliable, **12 / 12 out-of-domain abstained** (including the prompt-injection attempt), 0 pipeline errors;
-latency p50 6.3 s / p95 7.8 s, dominated by generation (p50 6.3 s). *Before this round (66 requests): 89.4% correct.*
+| cosine distance | clusters | complaints clustered | mean size | purity vs intent | purity vs root cause | ARI vs root cause | root causes recovered |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| 0.45 | 43 | 59% | 4.2 | 0.93 | 0.84 | 0.23 | 4 of 25 |
+| 0.55 | 37 | 90% | 7.3 | 0.88 | 0.75 | 0.48 | 14 of 25 |
+| 0.65 | 15 | 97% | 19.5 | 0.72 | 0.41 | 0.28 | 3 of 25 |
 
-**Evolving data:** two new intents (12 tickets, 2 articles) become searchable with no restart: Hit@5 0.00 → 0.92, MRR 0 → 0.61;
-intent accuracy only reaches 0.50 at 6 tickets per new class because existing neighbours outvote them (unchanged limitation).
+With 30 complaints from 3 never-seen classes mixed in (distance 0.55): 3 of 3 of those classes came out as their own cluster.
+
+**Evolving data** (12 queries about 2 new intents; no restart): Hit@5 0.00 before ingestion, 0.92 after ingesting 2 articles and a batch of 12 tickets in 0.09 s.
+
+**Emerging-class discovery** (21 complaints from 3 never-seen classes among 251 known): the abstention gate alone catches 24% of the novel complaints, the candidate filter 86%; clustering recovered 3 of 3 classes, proposal precision 0.60; after a person accepts the proposals, held-out complaints are routed correctly 0% → 56% with no resolved tickets for those classes.
+
+**Drift detection** (injection demo, 30 trials per scenario, no database, deterministic seeds; `python -m app.evaluation.drift_demo`):
+
+| scenario | alerts | rate |
+|---|---:|---:|
+| no change, 300 / 100 requests | 2 of 200 reports | 1.0% (95% 0.3% to 3.6%) |
+| no change, 140 / 70 requests | 2 of 200 reports | 1.0% (95% 0.3% to 3.6%) |
+| billing_dispute rises from ~16% to 25% of recent traffic | 0 of 30 reports | 0% (95% 0% to 11%) |
+| billing_dispute rises to 33% | 10 of 30 reports | 33% (95% 19% to 51%) |
+| billing_dispute rises to 40% | 30 of 30 reports | 100% (95% 89% to 100%) |
+| high/critical severity rises from ~30% to 40% | 0 of 30 reports | 0% (95% 0% to 11%) |
+| high/critical severity rises to 55% | 27 of 30 reports | 90% (95% 74% to 97%) |
+| 4 of 100 recent complaints (4%) are about a topic the corpus has never seen | 0 of 30 reports | 0% (95% 0% to 11%) |
+| 6 of 100 (6%) are a new topic | 0 of 30 reports | 0% (95% 0% to 11%) |
+| 10 of 100 (10%) are a new topic | 19 of 30 reports | 63% (95% 46% to 78%) |
+| three new topics at once, 8 complaints each (24% of recent traffic); detected = at least one recovered | 15 of 30 reports | 50% (95% 33% to 67%) |
+| every recent complaint arrives in chat-widget style (abbreviated, lower case) | 25 of 30 reports | 83% (95% 66% to 93%) |
+| tickets for 3 of 9 intents vanish from the evidence corpus | 2 of 30 reports | 7% (95% 2% to 21%) |
+
+**Retrieval misses** (dense, 151 hand-written complaints): the top-1 ticket is from another root cause for 14 (9 gold, 5 blind); for 8 of them it is a ticket of the same intent, i.e. an adjacent root cause. Most frequent confusions:
+
+| true root cause | retrieved root cause | queries |
+|---|---|---:|
+| plan_downgrade | plan_upgrade_speed | 2 |
+| wifi_only_drops | slow_wifi_far_room | 1 |
+| slow_wifi_far_room | slow_peak_speed | 1 |
+| slow_mobile_data | slow_peak_speed | 1 |
+| double_charge | late_fee | 1 |
+
+**Classifier errors** on the same 151 complaints (shipped ensemble):
+
+| dimension | errors | most frequent confusions (true → predicted) |
+|---|---|---:|
+| intent | 9 | device_issue → broadband_disconnection (2); device_issue → slow_speed (2); broadband_disconnection → slow_speed (1) |
+| product | 7 | wifi_router → broadband (2); account → broadband (2); broadband → wifi_router (1) |
+| severity | 53 | low → medium (27); high → medium (11); high → critical (6) |
+| sentiment | 45 | frustrated → neutral (22); concerned → neutral (10); angry → neutral (6) |
+
+**End-to-end failures** (10 of the in-domain complaints did not end in a resolution that cites the right root cause):
+
+| query | outcome | true root cause | cited root cause(s) | true cause in top-3 tickets | evidence confidence |
+|---|---|---|---:|---:|---:|
+| q-router_no_sync-7-5 | resolved, wrong source | router_no_sync | random_line_fault, router_reboot_loop | no | 0.86 |
+| q-plan_downgrade-6-4 | abstained | plan_downgrade | none | yes | 0.44 |
+| q-mobile_indoor_coverage-7-4 | abstained | mobile_indoor_coverage | none | yes | 0.44 |
+| q-otp_missing-6-4 | resolved, wrong source | otp_missing | cannot_call_text | yes | 0.77 |
+| q-area_outage_broadband-6-4 | unreliable | area_outage_broadband | install_not_active | no | 0.74 |
+| q-install_no_show-7-4 | resolved, wrong source | install_no_show | install_not_active | no | 0.87 |
+| gold-02 | resolved, wrong source | evening_drops | wifi_only_drops | yes | 0.90 |
+| gold2-56 | resolved, wrong source | otp_missing | late_fee | no | 0.85 |
+| gold2-66 | abstained | area_outage_mobile | none | yes | 0.54 |
+| gold2-68 | abstained | install_no_show | none | yes | 0.42 |
+
+**pgvector at scale (SYNTHETIC vectors, not a production benchmark):** 100,000 x 384 vectors, HNSW m=16, ef_construction=64: build 22.4 s (serial), 355 MB on disk (195 MB index); at ef_search 100: p50 1.422 ms, p95 1.976 ms, p99 2.556 ms, recall@10 0.9972 versus exact search. synthetic vectors (Gaussian mixture), no text, one Postgres container on a laptop, client and server share the machine.
+
+**Ingestion at the database layer** (2000 tickets with random embeddings, so the embedding model is excluded): 166 tickets/s with one transaction per ticket versus 717 tickets/s in one batched transaction (4.3x); re-running the same batch updates in place (2000 updated, 0 created).
+
+**Load test** (suite `2026-10-06-final`, commit `2e68d3d` (the working tree had uncommitted changes outside the request path)): Closed-loop Locust load test of one API process (suite 2026-10-06-final): Intel(R) Core(TM) i9-14900HX, 31.7 GB RAM, GPU NVIDIA GeForce RTX 4070 Laptop GPU, 8188 MiB, 576.28, shared by the LLM, NLI and embedding models; Postgres and Redis in Docker on the same machine. Full tables: loadtest/results/2026-10-06-final/SUMMARY.md.
+
+| scenario | users | OK req/s | p50 | p95 | p99 | errors | answered from evidence only |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| no LLM (evidence-only mode) | 1 | 18.37 | 54.0 ms | 63.3 ms | 67.5 ms | 0.0% | 89.9% |
+| no LLM (evidence-only mode) | 5 | 21.14 | 235 ms | 256 ms | 325 ms | 0.0% | 89.8% |
+| no LLM (evidence-only mode) | 10 | 20.8 | 476 ms | 533 ms | 571 ms | 0.0% | 90.0% |
+| no LLM (evidence-only mode) | 25 | 21.12 | 1,166 ms | 1,257 ms | 1,309 ms | 0.0% | 88.7% |
+| full pipeline, local LLM | 1 | 0.24 | 4,882 ms | 6,671 ms | 6,892 ms | 0.0% | 0.0% |
+| full pipeline, local LLM | 5 | 0.94 | 5,139 ms | 10.4 s | 11.4 s | 0.0% | 64.3% |
+| full pipeline, local LLM | 10 | 2.04 | 5,142 ms | 9,384 ms | 11.5 s | 0.0% | 76.5% |
+| LLM unreachable | 5 | 17.57 | 235 ms | 255 ms | 358 ms | 0.0% | 90.6% |
+
+One machine, one API replica, synthetic users replaying the evaluation complaints; client and server compete for the same CPU and GPU. It describes this setup, not a deployed system, and says nothing about multiple replicas or a dedicated LLM tier. With a concurrency limit of 1 on the single local GPU, requests beyond the first are answered from evidence only (the 'evidence-only' share) rather than queued, which is the designed behaviour.
+
+<!-- METRICS:END -->
+
+## Reading the results
+
+* **Semantic beats keyword.** On every split dense retrieval has the highest Hit@1 among the single strategies. The gap to keyword search is largest on the templated paraphrases (which share few words with history) and smaller, but still large, on hand-written text written after everything was frozen.
+* **The expected ordering dense < hybrid < hybrid + rerank did not hold on tickets.** Tuning on the validation split (`tuning.txt`) chose a lexical weight of 0 and a rerank blend of 0 for tickets. Paraphrases are deliberately lexically distant, and `ms-marco-MiniLM` is a query-to-passage relevance model, not a complaint-to-complaint similarity model. Hybrid helps on KB articles, so the machinery stays selectable per request, but `dense` is the default.
+* **Severity and sentiment improved most** (rules + kNN to an NLI cue model) and remain the weakest outputs. The legacy rules look perfect on the templated `test` split only because their lexicon and the generator share vocabulary (circular); the hand-written splits are the honest numbers.
+* **Retrieval and intent are robust to perturbation; affect is not.** Severity and sentiment depend on cue words and punctuation and lose the most when text is lower-cased without punctuation or truncated: the main remaining weakness for pasted-from-chat input.
+* **Discovery exists because abstention is not a novelty detector.** In a one-off live check with separate API and worker processes and the real LLM (not part of the recorded files), 30 complaints from three never-seen classes were sent to `/resolve`: 22 were answered from adjacent classes and 8 abstained; the queued discovery job then produced proposals for all three classes.
+* **Evolving data:** intent accuracy for the two new classes stays low at six tickets per class because existing neighbours outvote them (a known limitation); retrieval for them works at once.
+* **Latency.** End-to-end latency is the LLM call. An earlier recorded run (before the performance and prompt work of this phase, same hardware) had p50 6.3 s and p95 7.8 s; the table above is the current run.
+* **Clustering is honest about its limits.** Several root causes inside one intent are semantically close (two different fixes for the same symptom), so grouping by meaning merges them: purity against the intent label is clearly higher than against the root cause. Distance 0.55 is the setting that covers most complaints without merging unrelated intents; the sweep shows the trade-off either side.
+
+## Adaptive retrieval: design, tuning, honest result
+
+**Design.** Always run the cheap dense search; compute the dense cosine margin between rank 1 and rank 2; escalate only when the margin is below a threshold, first by adding a lexical leg (optionally reformulated with terms the best candidates share) fused with RRF, then, optionally, by reranking a bounded top N with the cross-encoder. The ladder has a hard cost bound (at most one extra lexical query and `ADAPTIVE_RERANK_TOP_N` cross-encoder passes), every decision is recorded, and each rung is a setting.
+
+**Tuning history (kept because the failures are the finding).**
+1. The first version escalated to lexical expansion on a quality signal built from top-1 similarity. Escalation lowered MRR, because on this corpus the lexical leg is worse than dense, so every query sent up the ladder paid for it.
+2. The quality signal did not predict which queries dense would get wrong. The ladder was rebuilt around the rank 1 minus rank 2 margin, which has a plain meaning (the top two are nearly tied) and costs nothing to compute.
+3. Thresholds were first tuned on the 50 validation queries and overfit (the gain vanished on `test`). They were re-tuned on `val` + `test` (150 templated queries) and then judged only on the hand-written `gold` and `blind` sets, which no threshold ever saw.
+4. Result: for tickets the tuned margin is 0.0, meaning never escalate; for KB articles a small margin escalates a minority of queries (see the ladder table) to the hybrid leg. The paired-bootstrap interval of adaptive minus dense includes zero on every held-out split and kind. The ablation block (`adaptive.ablations` in `latest.json`, 151 held-out queries) shows the optional pieces: MMR and the expansion terms move article Hit@1 by about one point and ticket metrics not at all, the reranker rung adds latency and no accuracy, and escalating every query lowers ticket Hit@1 while slightly raising article Hit@1, which is why the article margin is not zero.
+
+**What to conclude.** Adaptive retrieval here is a bounded, observable mechanism that matches dense retrieval at the same cost; it is not a measured quality gain. It would earn its place on a corpus where dense retrieval is weaker and the margin separates easy from hard queries. The default strategy therefore stays `dense`; `adaptive` is selectable per request and in the Retrieval lab.
+
+## Failure-case analysis
+
+The generated tables above list the individual failures (`data/eval/results/failure_analysis.json` from `backend/scripts/failure_analysis.py`, and `e2e.failure_cases` in `latest.json`). What they show, for the recorded run:
+
+1. **Most retrieval misses are adjacent root causes, not nonsense.** Of the 14 hand-written complaints whose top-1 ticket is from another root cause, 8 retrieved a ticket of the *same intent* (for example a plan-downgrade complaint matched to plan-upgrade tickets, a far-room Wi-Fi complaint matched to peak-hour slowness) and the right ticket is usually in the top six. This is the difference between two fixes for similar symptoms, which embedding similarity of the complaint text alone cannot always tell apart; the classifier's product and intent do not help because both root causes share them.
+2. **End-to-end failures fall into three groups.** (a) *Safe failures*: four in-domain complaints were abstained although the right ticket was in the top three. Their evidence confidence was 0.43 to 0.54, under the 0.55 abstention threshold. The system chose to escalate rather than answer on weak evidence; this is the price of the threshold that makes 12 of 12 out-of-domain complaints abstain. (b) *Caught failures*: one resolution was marked `unreliable` by the citation validator and escalated (the model cited a ticket from another root cause). (c) *Wrong-source answers that were not caught*: five resolutions cited a ticket from a different root cause; in three the right ticket was not in the top three at all (a retrieval miss), in two it was and the model's citations went to another one. These are the failures the validator cannot see, because the cited ticket is real and does support the steps written from it; only a person, or feedback, can tell it is the wrong problem. This is what the Feedback and quality view is for.
+3. **Intent errors cascade.** In the OTP-not-arriving cases the classifier read the complaint as a mobile-connectivity problem (the text mentions SMS), retrieval followed the symptom, and the answer cited a calling-and-texting ticket. The few product errors are between neighbouring products (router and broadband, account and broadband).
+4. **Severity and sentiment errors are mostly about the middle.** Low severity is read as medium far more often than the reverse, high as medium or critical; frustrated and concerned complaints are read as neutral. This is consistent with an NLI cue model that responds to explicit cue words: a calm sentence about a serious problem and an angry sentence about a trivial one are both hard, and the labels are the single labeller's judgement (see the limitations).
+5. **The adaptive ladder and dense retrieval disagree on no top-1 result** in the 151 hand-written tickets (the ladder stops at dense for every one of them), so none of the above is changed by it.
+
+What was not done: the failures were read and grouped, but no new rule, threshold or prompt was tuned against them. Tuning on the hand-written sets would spend the only data that was not used for selection.
 
 ## Additional exploration (what was tried, what won, why)
 

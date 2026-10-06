@@ -88,6 +88,25 @@ Attribute names below omit their `resolveiq.` prefix (for example `latency_ms.to
 | `ingest.ticket`, `ingest.article`, `ingest.batch`, `ingest.reindex` | `ingestion/pipeline.py` | `ingest.created/updated/failed`, `batch_size`, `corpus_version`, `embedding_ms` |
 | `worker.job`, `job.<kind>`, `discovery.run` | `worker.py`, `jobs.py`, `discovery/service.py` | `job_id`, `job_kind`, `job_attempt`, discovery counts |
 | `drift.analyze` | `drift/service.py` | `job_id`, `drift.alerts`, `drift.emerging_clusters` |
+| `retrieval.adaptive.decision` (span event on `retrieval.search`) | `retrieval/service.py` | `retrieval.kind`, `adaptive.stage` (dense, hybrid, rerank), `adaptive.signal`, `adaptive.value`, `adaptive.action` (stop or escalate) |
+| `cases.get`, `cases.replay` | `cases/service.py` | `request_id`, `strategy`, `generate`, `deterministic`, `replay.reproduced`, `replay.status` |
+| `lab.compare` | `lab/service.py` | `complaint_chars` (a length, never the text), `retrieval.k` |
+| `clusters.compute` | `clusters/service.py` | `window_days`, `cluster.min_size`, `cluster.distance`, `cluster.count`, `cluster.distinct` |
+| `feedback.save`, `feedback.analyze` | `quality/service.py` | `request_id`, `feedback.rating`, `window_days` |
+| `db.health` | `system/health.py` | `db.findings`, `db.status` |
+
+### Metrics added with the console and adaptive retrieval
+
+| Metric | Labels | Meaning |
+|---|---|---|
+| `resolveiq_adaptive_retrieval_stages_total` | `kind`, `stage`, `action` | which rung of the adaptive ladder ran and whether it stopped or escalated; the ratio shows how often the cheap path was enough |
+| `resolveiq_feedback_total` | `rating` | agent feedback received |
+| `resolveiq_case_replays_total` | `outcome` | replays of stored cases (`identical`, `changed`, `error`) |
+| `resolveiq_recurring_clusters_seconds` | | time to compute the recurring-complaint groups |
+| `resolveiq_llm_in_flight`, `resolveiq_llm_shed_total`, `resolveiq_llm_queue_wait_seconds` | `provider` | LLM concurrency slots in use, calls refused because every slot was busy, time waiting for a slot |
+
+Everything else keeps its name and meaning (`resolveiq_pipeline_stage_latency_seconds`, `resolveiq_retrieval_latency_seconds`, the drift gauges and alerts, ...). The complete list is `backend/app/observability/metrics.py`.
+No label ever carries complaint text: labels are statuses, strategies, stages, intents and reasons.
 
 ## Ids: nothing about the existing ones changed
 

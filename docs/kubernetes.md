@@ -4,6 +4,11 @@ ResolveIQ's manifests (`k8s/base/`) were applied to a real cluster for the first
 page says what that cluster was, how to reproduce it, what was and was **not** tested, what the test found, and what would change for a
 cloud deployment. **Nothing here is a claim of production-grade Kubernetes infrastructure**: the cluster is one node on a laptop.
 
+> **Which code this evidence is from.** The cluster run and every result in `k8s/local/results/2026-10-06/` were recorded on commit `2d32e72` (the Kubernetes commit). The console, adaptive-retrieval,
+> database and security work that followed (migrations 004, new endpoints, a new prompt) was **not** redeployed to the cluster: a rebuild was started and the Docker engine on the laptop stopped
+> responding during the image build, and the redeploy was dropped for lack of time. The manifests did not change, the new settings all have defaults, and the new migration is applied by the same
+> migrate Job, but that is reasoning, not a test. To re-verify: `bash k8s/local/deploy.sh --ingress && python k8s/local/e2e_test.py --ingress`.
+
 ## 1. What was tested, and what was not
 
 | Tested on the kind cluster (evidence in [`k8s/local/results/2026-10-06/`](../k8s/local/results/2026-10-06/)) | Not tested |

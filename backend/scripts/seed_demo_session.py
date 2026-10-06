@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 import urllib.request
 from pathlib import Path
 
@@ -38,6 +39,7 @@ def main() -> int:
     ap.add_argument("--n", type=int, default=30)
     ap.add_argument("--novel", type=int, default=0, help="also resolve this many complaints from classes the corpus does not cover (simulated agents reject any answer given)")
     ap.add_argument("--force", action="store_true")
+    ap.add_argument("--analyze", action="store_true", help="afterwards run a drift analysis and a discovery job (inline jobs: the API must run with JOB_EXECUTION=inline, as demo_env.py api does)")
     a = ap.parse_args()
     if call(a.api, "GET", "/api/v1/cases?limit=1", a.key)["total"] and not a.force:
         print("the API already has cases; refusing to add demo data (use --force)")
@@ -79,6 +81,15 @@ def main() -> int:
         bad += 1
         print(f"novel {i + 1}: answered as {r['classification']['intent']} -> simulated rating: not_helpful")
     print(f"done: {ok} helpful, {bad} not helpful (simulated from ground truth)")
+    if a.analyze:
+        for path in ("/api/v1/monitoring/drift/run", "/api/v1/taxonomy/discover"):
+            job = call(a.api, "POST", path, a.key, {})
+            for _ in range(120):
+                state = call(a.api, "GET", f"/api/v1/jobs/{job['job_id']}", a.key)
+                if state["status"] in ("succeeded", "failed"):
+                    break
+                time.sleep(2)
+            print(f"{path}: {state['status']}")
     return 0
 
 

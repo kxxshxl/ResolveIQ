@@ -35,8 +35,8 @@ function Card({ c }: { c: RecurringCluster }) {
       <div className="chips">{c.keywords.map((k) => <code key={k} className="chip">{k}</code>)}</div>
       <div className="related">
         <strong className="small">Taxonomy</strong>
-        {c.proposals.length ? c.proposals.map((p) => <p className="small" key={p.proposal_id}>{p.recommendation === "new_class" ? "Proposes a new class" : "Proposes extending"} <strong>{label(p.label_id)}</strong> ({p.status}), covering {pct(p.overlap_share)} of this group. <a href="#/discovery">Review in Discovery →</a></p>)
-          : <p className="small muted">{c.mean_evidence != null && c.mean_evidence >= 0.8 ? "Existing tickets already explain these complaints: no new class needed." : <>No proposal yet. <a href="#/discovery">Run discovery →</a></>}</p>}
+        {c.proposals.length ? c.proposals.map((p) => <p className="small" key={p.proposal_id}>{p.recommendation === "new_class" ? "Proposes a new intent" : "Proposes extending"} <strong>{label(p.label_id)}</strong> ({p.status}), covering {pct(p.overlap_share)} of this group. <a href="#/discovery">Review in Discovery →</a></p>)
+          : <p className="small muted">{c.mean_evidence != null && c.mean_evidence >= 0.8 ? "Existing tickets already explain these complaints: no new intent needed." : <>No proposal yet. <a href="#/discovery">Run discovery →</a></>}</p>}
       </div>
     </article>
   );

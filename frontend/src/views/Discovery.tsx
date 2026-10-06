@@ -60,8 +60,8 @@ function ProposalCard({ p, taxonomy, onDone, onToast }: { p: Proposal; taxonomy:
   return (
     <article className={`card proposal ${p.status}`}>
       <div className="row wrap-start">
-        <h3 className="proposal-title">{label(p.label_id)}</h3>
-        <span className={`pill ${extend ? "warn" : "ok"}`}>{extend ? `extends ${label(p.nearest_intent ?? "?")}` : "new class"}</span>
+        <h3 className="proposal-title">{extend ? `Extend ${label(p.nearest_intent ?? p.label_id)}` : `New intent: ${p.keywords.slice(0, 3).join(", ")}`}</h3>
+        <span className={`pill ${extend ? "warn" : "ok"}`}>{extend ? "extends an existing intent" : "new intent"}</span>
         {!pending && <span className={`pill ${p.status === "accepted" ? "ok" : "bad"}`}>{p.status}</span>}
         <span className="grow" />
         <span className="muted small">{p.members} complaints{p.product ? ` · ${p.product}` : ""}</span>
@@ -194,7 +194,7 @@ export default function Discovery({ onPendingChange }: { onPendingChange?: (n: n
           <div className="grow">
             <h2>Emerging-class discovery</h2>
             <p className="muted small">
-              Complaints that existing tickets and articles explain poorly are clustered. Each cluster becomes a proposal: a <strong>new class</strong>, or an <strong>extension</strong> of
+              Complaints that existing tickets and articles explain poorly are clustered. Each cluster becomes a proposal: a <strong>new intent</strong>, or an <strong>extension</strong> of
               the nearest existing intent. Nothing changes until a person accepts it.
               {taxonomy && <> Current taxonomy: <strong>v{taxonomy.version}</strong>, {taxonomy.labels.intent?.length ?? 0} intents.</>}
             </p>

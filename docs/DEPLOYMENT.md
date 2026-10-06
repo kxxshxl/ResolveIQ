@@ -9,8 +9,8 @@ Two supported targets, both verified artefacts in this repository:
 
 What was actually exercised (on Docker Desktop, Windows 11): the full production Compose stack (2 backend replicas, TLS proxy,
 Prometheus scraping both replicas with a bearer token, Grafana), `deploy/smoke_test.py` (12/12 checks), backup + restore, the
-fail-fast insecure-config check, and the read-only / non-root / cap-dropped containers. The Kubernetes manifests are
-syntax-validated and follow the same image and probes, but were **not applied to a live cluster** here.
+fail-fast insecure-config check, and the read-only / non-root / cap-dropped containers. The Kubernetes manifests were also applied to a
+single-node kind cluster and exercised end to end (22 checks, see [kubernetes.md](kubernetes.md)); that is a local cluster, not a managed one. That run used the code of commit `2d32e72`; later changes were not redeployed to the cluster (see kubernetes.md).
 
 ## 1. Single-host deployment (Docker Compose)
 

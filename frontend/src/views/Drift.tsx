@@ -99,7 +99,7 @@ function ClusterCard({ c, discovery }: { c: DriftCluster; discovery?: DriftRepor
             {c.related_proposals.map((p) => (
               <li key={p.proposal_id} className="alert-item">
                 <span className={`pill ${p.status === "accepted" ? "ok" : p.status === "rejected" ? "bad" : "warn"}`}>{p.status}</span>
-                <span>{p.recommendation === "new_class" ? "new class" : "extends"} <strong>{label(p.label_id)}</strong> · covers {pct(p.overlap_share)} of this group ({p.overlap} complaints)</span>
+                <span>{p.recommendation === "new_class" ? "new intent" : "extends"} <strong>{label(p.label_id)}</strong> · covers {pct(p.overlap_share)} of this group ({p.overlap} complaints)</span>
               </li>
             ))}
           </ul>

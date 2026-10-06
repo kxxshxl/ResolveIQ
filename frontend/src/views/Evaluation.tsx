@@ -111,10 +111,10 @@ function Evolving({ r, f }: { r: Rec; f?: { path: string; written: string } }) {
   const d = r.discovery, c = r.clustering, ev = r.evolving;
   if (!d && !c && !ev) return null;
   return (
-    <Panel title="Evolving data and classes" subtitle="New resolved tickets, new classes nobody named, and recurring complaint groups">
+    <Panel title="Evolving data and intents" subtitle="New resolved tickets, new intents nobody named, and recurring complaint groups">
       <div className="kpis">
-        {ev && <Stat name="New classes searchable" value={`${fixed(ev.before_ingestion?.["hit@5"], 2)} → ${fixed(ev.after_ingestion?.["hit@5"], 2)}`} hint="Hit@5 before and after ingesting 2 new classes, no restart" />}
-        {d && <><Stat name="Unseen classes recovered" value={`${d.proposals.recovered_classes}/${d.proposals.of}`} hint="Clusters proposing a new class" /><Stat name="Proposal precision" value={fixed(d.proposals.precision, 2)} /><Stat name="Candidate recall" value={pct(d.candidate_selection.novel_recall)} hint="Novel complaints that low evidence flags" /><Stat name="Abstention alone catches" value={pct(d.candidate_selection.abstention_only_novel_recall)} /></>}
+        {ev && <Stat name="New intents searchable" value={`${fixed(ev.before_ingestion?.["hit@5"], 2)} → ${fixed(ev.after_ingestion?.["hit@5"], 2)}`} hint="Hit@5 before and after ingesting 2 new intents, no restart" />}
+        {d && <><Stat name="Unseen intents recovered" value={`${d.proposals.recovered_classes}/${d.proposals.of}`} hint="Clusters proposing a new intent" /><Stat name="Proposal precision" value={fixed(d.proposals.precision, 2)} /><Stat name="Candidate recall" value={pct(d.candidate_selection.novel_recall)} hint="Novel complaints that low evidence flags" /><Stat name="Abstention alone catches" value={pct(d.candidate_selection.abstention_only_novel_recall)} /></>}
         {c && <><Stat name="Clusters purity vs intent" value={fixed(c.default.vs_intent.purity, 2)} hint={`${c.default.clusters} clusters over ${c.complaints} complaints`} /><Stat name="Scenario recovery" value={`${c.default.vs_scenario.recovered}/${c.default.vs_scenario.of}`} /><Stat name="Unseen topics as own clusters" value={`${c.with_unseen_topics.recovered}/${c.with_unseen_topics.of}`} /></>}
       </div>
       <Source f={f} />

@@ -8,7 +8,7 @@ from typing import Sequence
 from app.evaluation.datasets import load_eval_sets
 from app.evaluation.discovery_eval import discovery_suite
 from app.evaluation.robustness import robustness_suite
-from app.evaluation.suites import classification_suite, evolving_suite, rag_e2e_suite, retrieval_suite
+from app.evaluation.suites import adaptive_suite, classification_suite, evolving_suite, rag_e2e_suite, retrieval_suite
 from app.services.container import Services
 from app.services.llm.base import ResilientLLM
 from app.services.llm.providers import OpenAICompatProvider
@@ -44,6 +44,8 @@ async def run_suites(svc: Services, suites: Sequence[str], max_queries: int | No
         if alt_openai_model:
             variants.append(alt_openai_variant(svc, alt_openai_model))
         results.update(await rag_e2e_suite(svc, sets, max_queries, want, judge_n=judge_n, variants=variants))
+    if "adaptive" in want:
+        results["adaptive"] = await adaptive_suite(svc, sets, max_queries)
     if "evolving" in want:
         results["evolving"] = await evolving_suite(svc, sets, svc.settings.data_dir)
     if "discovery" in want:

@@ -7,7 +7,7 @@ import re
 from app.observability import tracing
 from app.core.errors import ResolveIQError
 from app.models.schemas import Classification, Resolution, RetrievedItem, Step
-from app.rag.prompts import SYSTEM_PROMPT, build_user_prompt
+from app.rag.prompts import PromptBuild
 from app.services.llm.base import LLMResult, ResilientLLM
 
 
@@ -41,9 +41,8 @@ def parse_resolution(text: str) -> Resolution:
         raise GenerationError(f"LLM JSON did not match the expected schema: {exc}") from exc
 
 
-async def generate_with_llm(llm: ResilientLLM, complaint: str, cls: Classification,
-                            evidence: list[RetrievedItem]) -> tuple[Resolution, LLMResult]:
-    res = await llm.generate(SYSTEM_PROMPT, build_user_prompt(complaint, cls, evidence), json_mode=True)
+async def generate_with_llm(llm: ResilientLLM, build: PromptBuild, *, temperature: float = 0.1, seed: int | None = None) -> tuple[Resolution, LLMResult]:
+    res = await llm.generate(build.system, build.user, json_mode=True, temperature=temperature, seed=seed)
     return parse_resolution(res.text), res
 
 

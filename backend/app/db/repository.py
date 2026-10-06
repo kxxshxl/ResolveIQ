@@ -45,6 +45,7 @@ class Repository:
                 await conn.execute("SET hnsw.iterative_scan = 'relaxed_order'")  # pgvector >= 0.8
             except Exception:  # noqa: BLE001 - older pgvector
                 pass
+            await conn.execute(f"SET hnsw.ef_search = {int(self.s.hnsw_ef_search)}")
 
         self.pool = AsyncConnectionPool(
             self.s.database_url,
@@ -229,6 +230,23 @@ class Repository:
         rows = await self._fetch("SELECT lexeme FROM unnest(to_tsvector('english', %s))", (text,))
         return [r["lexeme"] for r in rows]
 
+    async def query_lexemes_many(self, texts: list[str]) -> list[list[str]]:
+        """Lexemes of several texts in ONE round trip (row i of the result belongs to texts[i])."""
+        rows = await self._fetch(
+            "SELECT t.i, array(SELECT lexeme FROM unnest(to_tsvector('english', t.txt))) AS lexemes "
+            "FROM unnest(%s::text[]) WITH ORDINALITY AS t(txt, i) ORDER BY t.i", (list(texts),))
+        return [list(r["lexemes"]) for r in rows]
+
+    async def get_embeddings(self, kind: str, ids: Sequence[str], model: str) -> dict:
+        """source id -> embedding (numpy) for the given documents; used by diversity re-ranking."""
+        import numpy as np
+
+        meta = KINDS[kind]
+        rows = await self._fetch(
+            f"SELECT d.{meta['id']} AS source_id, e.embedding::real[] AS emb FROM {meta['emb']} e JOIN {meta['table']} d ON d.id = e.{meta['fk']} "
+            f"WHERE e.model = %s AND d.{meta['id']} = ANY(%s)", (model, list(ids)))
+        return {r["source_id"]: np.asarray(r["emb"], dtype=np.float32) for r in rows}
+
     async def doc_frequencies(self, kind: str) -> tuple[int, dict[str, int]]:
         """(n_docs, lexeme -> number of docs containing it), from Postgres' own tsvector statistics."""
         meta = KINDS[kind]
@@ -299,12 +317,16 @@ class Repository:
     # ------------------------------------------------------------- requests / feedback / jobs / evals
     @tracing.traced("db.save_request")
     async def save_request(self, request_id: str, trace_id: str, complaint: str, classification: dict,
-                           retrieved: list[dict], result: dict, status: str, confidence: float, latency_ms: int) -> None:
+                           retrieved: list[dict], result: dict, status: str, confidence: float, latency_ms: int,
+                           embedding: Sequence[float] | None = None, embedding_model: str | None = None,
+                           trace: list[dict] | None = None, provenance: dict | None = None) -> None:
         await self._exec(
-            """INSERT INTO resolution_requests (request_id,trace_id,complaint,classification,retrieved,result,status,confidence,latency_ms)
-               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+            """INSERT INTO resolution_requests (request_id,trace_id,complaint,classification,retrieved,result,status,confidence,latency_ms,
+                                                 embedding,embedding_model,trace,provenance)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::vector,%s,%s,%s)""",
             (request_id, trace_id, complaint, Jsonb(classification), Jsonb(retrieved), Jsonb(result), status,
-             confidence, latency_ms))
+             confidence, latency_ms, vec_literal(embedding) if embedding is not None else None, embedding_model,
+             Jsonb(trace) if trace is not None else None, Jsonb(provenance) if provenance is not None else None))
 
     async def request_exists(self, request_id: str) -> bool:
         return bool(await self._fetch("SELECT 1 FROM resolution_requests WHERE request_id=%s", (request_id,)))

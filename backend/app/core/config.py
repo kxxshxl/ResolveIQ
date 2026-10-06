@@ -44,6 +44,19 @@ class Settings(BaseSettings):
     reranker_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
     reranker_enabled: bool = True
     default_retrieval_strategy: str = "dense"  # chosen on validation evidence, see docs/evaluation.md
+    hnsw_ef_search: int = 40                   # pgvector recall/latency knob (40 = pgvector default); measured in docs/database.md
+
+    # --- adaptive retrieval: start cheap (dense) and spend more only when the evidence looks weak; thresholds chosen on the validation split ---
+    adaptive_margin_ticket: float = 0.0        # dense rank-1 vs rank-2 cosine gap below which a TICKET search counts as ambiguous and escalates. 0 = never: on the tuning queries
+                                               # every ticket escalation lowered MRR, because dense is the best single leg for ticket-to-ticket similarity (docs/evaluation.md)
+    adaptive_margin_article: float = 0.0181    # the same for KB articles: escalate to hybrid when the top two are this close (about the 25th percentile of the tuning queries)
+    adaptive_rerank_gap: float = 0.0           # after the hybrid stage: rerank only if the fused rank-1 score leads rank-2 by less than this fraction. 0 = never: on validation
+                                               # the extra rung cost ~9 ms and gained nothing (docs/evaluation.md)
+    adaptive_expand_kinds: str = ""            # which searches reformulate the lexical leg with terms the best candidates share ("ticket,article" to enable). Off: no gain on the tuning queries
+    adaptive_expansion_terms: int = 6
+    adaptive_mmr: bool = False                 # diversify the final list with MMR (off unless the benchmark shows it helps)
+    adaptive_mmr_lambda: float = 0.7
+    adaptive_rerank_top_n: int = 12            # bounded: fewer cross-encoder passes than the fixed hybrid_reranked pipeline
 
     # --- retrieval ---
     candidate_k: int = 30          # per-retriever candidates before fusion
@@ -91,6 +104,11 @@ class Settings(BaseSettings):
                                             # otherwise a hung LLM turns every request into a 504 instead of the evidence-only fallback
     llm_max_retries: int = 1
     llm_max_tokens: int = 700
+    llm_temperature: float = 0.1
+    llm_deterministic: bool = False         # temperature 0 and a fixed seed: the same prompt gives the same answer (evaluation, replay, regression tests)
+    llm_seed: int = 7                       # used when deterministic (a request may also ask for it)
+    llm_num_ctx: int = 4096                 # the model's context window as configured on the server; the prompt budget is derived from it
+    llm_context_reserve_tokens: int = 150   # safety margin below the window on top of the reserved answer length
     llm_max_concurrency: int = 1            # simultaneous generations per provider (0 = unlimited). A local model serves requests one at a time,
                                             # so more in flight only lengthens every answer; see docs/performance.md
     llm_queue_wait_seconds: float = 5.0     # how long an answer may wait for a free slot before the request degrades to evidence-only

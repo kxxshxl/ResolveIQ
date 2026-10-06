@@ -7,7 +7,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, field_validator
 
 SourceType = Literal["ticket", "article"]
-Strategy = Literal["lexical", "bm25", "dense", "hybrid", "hybrid_reranked"]
+Strategy = Literal["lexical", "bm25", "dense", "hybrid", "hybrid_reranked", "adaptive"]
 
 
 # ----------------------------------------------------------------- classification
@@ -100,6 +100,7 @@ class ResolveRequest(BaseModel):
     complaint: str = Field(..., min_length=5, max_length=4000)
     strategy: Strategy | None = None
     use_metadata_filters: bool = False
+    deterministic: bool = False   # temperature 0 and a fixed seed for the LLM, for reproducible evaluation and replay
 
     @field_validator("complaint")
     @classmethod
@@ -114,6 +115,7 @@ class Step(BaseModel):
     citations: list[str] = Field(default_factory=list)
     grounded: bool | None = None
     grounding_score: float | None = None
+    support: dict[str, float] = Field(default_factory=dict)   # cited source id -> how well that source's text supports this step (cosine)
 
 
 class Citation(BaseModel):
@@ -153,6 +155,74 @@ class Resolution(BaseModel):
     uncertainty: str | None = None
 
 
+class StageRecord(BaseModel):
+    """One stage of the pipeline as it ran: enough to debug or replay a case, never raw customer text."""
+    name: str
+    status: Literal["ok", "skipped", "degraded", "error"] = "ok"
+    latency_ms: float | None = None
+    detail: dict[str, Any] = Field(default_factory=dict)
+
+
+class Provenance(BaseModel):
+    """Everything needed to answer: which model, prompt, taxonomy, corpus and retrieval configuration produced this resolution?"""
+    pipeline_version: str
+    generator: str                                   # provider:model, "extractive" or "none"
+    model: str | None = None
+    prompt_version: str | None = None
+    prompt_hash: str | None = None
+    taxonomy_version: int | None = None
+    corpus_version: int | None = None
+    embedding_model: str | None = None
+    reranker: str | None = None
+    retrieval: dict[str, Any] = Field(default_factory=dict)
+    thresholds: dict[str, float] = Field(default_factory=dict)
+    generation: dict[str, Any] = Field(default_factory=dict)   # temperature, seed, token counts, what went into the prompt
+
+
+class LineageSource(BaseModel):
+    id: str
+    type: SourceType
+    title: str
+    excerpt: str
+    rank: int
+    method: str
+    score: float
+    stage_scores: dict[str, float] = Field(default_factory=dict)
+    why: list[str] = Field(default_factory=list)      # plain-language reasons this source was retrieved
+    intent: str | None = None
+    matches_intent: bool = False
+    selected: bool = False                            # chosen as evidence for generation
+    in_prompt: bool = False                           # actually shown to the model
+    cited_by_steps: list[int] = Field(default_factory=list)
+
+
+class LineageStep(BaseModel):
+    index: int
+    text: str
+    citations: list[str]
+    grounded: bool | None = None
+    grounding_score: float | None = None
+    support: dict[str, float] = Field(default_factory=dict)
+
+
+class LineageEdge(BaseModel):
+    kind: Literal["extracted", "retrieved", "selected", "cited"]
+    source: str
+    target: str
+    weight: float | None = None
+
+
+class Lineage(BaseModel):
+    """complaint -> attributes -> retrieved sources -> evidence -> steps -> citations -> validation, as data."""
+    complaint: dict[str, Any]
+    attributes: list[dict[str, Any]]
+    sources: list[LineageSource]
+    steps: list[LineageStep]
+    edges: list[LineageEdge]
+    signals: dict[str, Any]                           # safe, auditable quality signals (no model reasoning)
+    checks: dict[str, bool]                           # invariants such as "every citation maps to a retrieved source"
+
+
 class ResolveResponse(BaseModel):
     request_id: str
     trace_id: str
@@ -170,6 +240,12 @@ class ResolveResponse(BaseModel):
     warnings: list[str] = Field(default_factory=list)
     latency_ms: dict[str, float]
     cached: bool = False
+    provenance: Provenance | None = None
+    trace: list[StageRecord] = Field(default_factory=list)
+    lineage: Lineage | None = None
+
+
+FEEDBACK_REASONS = ("wrong_intent", "steps_incorrect", "steps_missing", "irrelevant_source", "outdated_source", "unsafe", "too_vague", "other")
 
 
 class FeedbackIn(BaseModel):
@@ -177,10 +253,14 @@ class FeedbackIn(BaseModel):
     rating: Literal["helpful", "not_helpful"]
     comment: str | None = Field(None, max_length=2000)
     corrected_intent: str | None = None
+    reasons: list[Literal["wrong_intent", "steps_incorrect", "steps_missing", "irrelevant_source", "outdated_source", "unsafe", "too_vague", "other"]] = Field(
+        default_factory=list, max_length=8)
+    rejected_sources: list[str] = Field(default_factory=list, max_length=20)   # ids of retrieved sources the agent judged irrelevant or wrong
+    edited_steps: list[str] | None = Field(None, max_length=12)                 # the resolution as the agent would send it
 
 
 class EvaluateRequest(BaseModel):
-    suites: list[Literal["classification", "retrieval", "robustness", "rag", "e2e", "evolving", "discovery"]] = Field(
+    suites: list[Literal["classification", "retrieval", "robustness", "rag", "e2e", "evolving", "discovery", "adaptive", "clustering"]] = Field(
         default_factory=lambda: ["classification", "retrieval"]
     )
     max_queries: int | None = Field(None, ge=1, le=1000)

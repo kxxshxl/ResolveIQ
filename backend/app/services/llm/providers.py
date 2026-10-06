@@ -21,18 +21,18 @@ def _timeout(total: float, connect: float) -> httpx.Timeout:
 class OllamaProvider:
     name = "ollama"
 
-    def __init__(self, base_url: str, model: str, connect_timeout: float = 5.0):
-        self.base_url, self.model, self.connect_timeout = base_url.rstrip("/"), model, connect_timeout
+    def __init__(self, base_url: str, model: str, connect_timeout: float = 5.0, num_ctx: int = 4096):
+        self.base_url, self.model, self.connect_timeout, self.num_ctx = base_url.rstrip("/"), model, connect_timeout, num_ctx
         self._client = httpx.AsyncClient()
         tracing.instrument_http_client(self._client)
 
-    async def generate(self, system, user, *, json_mode=True, max_tokens=700, temperature=0.1, timeout=45.0) -> LLMResult:
+    async def generate(self, system, user, *, json_mode=True, max_tokens=700, temperature=0.1, timeout=45.0, seed=None) -> LLMResult:
         body = {
             "model": self.model,
             "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
             "stream": False,
             "think": False,
-            "options": {"temperature": temperature, "num_predict": max_tokens, "num_ctx": 4096},
+            "options": {"temperature": temperature, "num_predict": max_tokens, "num_ctx": self.num_ctx, **({"seed": seed} if seed is not None else {})},
         }
         if json_mode:
             body["format"] = "json"
@@ -43,7 +43,7 @@ class OllamaProvider:
         return LLMResult(
             text=d["message"]["content"], provider=f"{self.name}", model=self.model,
             prompt_tokens=d.get("prompt_eval_count"), completion_tokens=d.get("eval_count"),
-            latency_s=time.perf_counter() - t0,
+            latency_s=time.perf_counter() - t0, temperature=temperature, seed=seed,
         )
 
     async def healthy(self) -> bool:
@@ -64,11 +64,12 @@ class OpenAICompatProvider:
     def _headers(self):
         return {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
 
-    async def generate(self, system, user, *, json_mode=True, max_tokens=700, temperature=0.1, timeout=45.0) -> LLMResult:
+    async def generate(self, system, user, *, json_mode=True, max_tokens=700, temperature=0.1, timeout=45.0, seed=None) -> LLMResult:
         body = {
             "model": self.model,
             "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
             "temperature": temperature, "max_tokens": max_tokens, "stream": False,
+            **({"seed": seed} if seed is not None else {}),
         }
         if json_mode:
             body["response_format"] = {"type": "json_object"}
@@ -79,7 +80,7 @@ class OpenAICompatProvider:
         text = re.sub(r"<think>.*?</think>", "", d["choices"][0]["message"]["content"] or "", flags=re.S).strip()
         u = d.get("usage") or {}
         return LLMResult(text=text, provider=self.name, model=self.model, prompt_tokens=u.get("prompt_tokens"),
-                         completion_tokens=u.get("completion_tokens"), latency_s=time.perf_counter() - t0)
+                         completion_tokens=u.get("completion_tokens"), latency_s=time.perf_counter() - t0, temperature=temperature, seed=seed)
 
     async def healthy(self) -> bool:
         r = await self._client.get(f"{self.base_url}/models", headers=self._headers(), timeout=3)
@@ -93,7 +94,7 @@ class MockProvider:
     name = "mock"
     model = "mock-extractive"
 
-    async def generate(self, system, user, *, json_mode=True, max_tokens=700, temperature=0.1, timeout=45.0) -> LLMResult:
+    async def generate(self, system, user, *, json_mode=True, max_tokens=700, temperature=0.1, timeout=45.0, seed=None) -> LLMResult:
         if "classify" in system.lower()[:200]:
             return LLMResult(text=json.dumps({"intent": "unknown", "product": "unknown", "severity": "medium", "sentiment": "neutral"}),
                              provider=self.name, model=self.model)
@@ -121,7 +122,7 @@ def build_llm(settings: Settings) -> ResilientLLM:
     providers = []
     for name in settings.provider_chain:
         if name == "ollama":
-            providers.append(OllamaProvider(settings.ollama_base_url, settings.ollama_model, settings.llm_connect_timeout_seconds))
+            providers.append(OllamaProvider(settings.ollama_base_url, settings.ollama_model, settings.llm_connect_timeout_seconds, settings.llm_num_ctx))
         elif name == "openai_compat" and settings.openai_compat_base_url and settings.openai_compat_model:
             providers.append(OpenAICompatProvider(settings.openai_compat_base_url, settings.openai_compat_api_key,
                                                   settings.openai_compat_model, settings.llm_connect_timeout_seconds))

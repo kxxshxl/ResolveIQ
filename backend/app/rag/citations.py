@@ -94,6 +94,8 @@ async def validate_resolution(resolution: Resolution, evidence: list[RetrievedIt
             continue
         idx = [j for j, (si, _) in enumerate(owner) if si == i]
         cos = float(np.max(unit_vecs[idx] @ step_vecs[i])) if idx else 0.0
+        st.support = {cid: round(max(0.0, float(np.max(unit_vecs[[j for j in idx if owner[j][1] == cid]] @ step_vecs[i]))), 3) for cid in st.citations
+                      if any(owner[j][1] == cid for j in idx)}   # per-citation evidence: how well each cited source backs this step
         units = [texts[j] for j in idx]
         cont = containment(st.text, units)
         st.grounding_score = round(max(cos, 0.0), 3)

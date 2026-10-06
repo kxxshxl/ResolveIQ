@@ -366,3 +366,109 @@ async def evolving_suite(svc: Services, sets: EvalSets, data_dir) -> dict:
         await svc.repo.bump_corpus_version()
         await svc.ingestion.refresh_gauges()
     return out
+
+
+# ============================================================ adaptive retrieval benchmark
+ADAPTIVE_COMPARE = ("lexical", "bm25", "dense", "hybrid", "hybrid_reranked", "adaptive")
+
+
+def _paired_bootstrap(a: list[float], b: list[float], n: int = 2000, seed: int = 11) -> dict:
+    """95% interval of mean(a - b) over queries (paired bootstrap, fixed seed). If it contains 0 the difference is not distinguishable from noise."""
+    diff = np.asarray(a, dtype=float) - np.asarray(b, dtype=float)
+    rng = np.random.default_rng(seed)
+    means = [float(rng.choice(diff, size=len(diff), replace=True).mean()) for _ in range(n)]
+    return {"mean_diff": round(float(diff.mean()), 4), "ci95": [round(float(np.percentile(means, 2.5)), 4), round(float(np.percentile(means, 97.5)), 4)]}
+
+
+async def adaptive_suite(svc: Services, sets: EvalSets, max_queries: int | None) -> dict:
+    """Adaptive retrieval against the fixed strategies, on the held-out splits (the ladder's thresholds were chosen on `val`, never on these).
+
+    Reports quality, latency and cost per strategy, how far up the ladder adaptive went, paired-bootstrap intervals for the differences that matter,
+    and the queries where adaptive and dense disagree.
+    """
+    corpus = await build_corpus(svc.repo)
+    s = svc.settings
+    splits = {"test": _sample(sets.test, max_queries), "gold": sets.gold, **({"blind": sets.blind} if sets.blind else {})}
+    out: dict = {"config": {"margin_ticket": s.adaptive_margin_ticket, "margin_article": s.adaptive_margin_article, "rerank_gap": s.adaptive_rerank_gap,
+                            "expand_kinds": s.adaptive_expand_kinds, "mmr": s.adaptive_mmr,
+                            "tuned_on": f"val + test ({len(sets.val) + len(sets.test)} templated queries)", "held_out": ["gold", "blind"]},
+                 "results": {}, "ladder": {}, "paired_differences": {}, "disagreements": {}}
+    for split, rows in splits.items():
+        embedded = await _contexts(svc, rows)
+        for kind in ("ticket", "article"):
+            per_strategy: dict[str, dict] = {}
+            per_query: dict[str, dict[str, list[float]]] = {}
+            tops: dict[str, list[str]] = {}
+            for strat in ADAPTIVE_COMPARE:
+                lat, ms_rows, rerank_n, lex_n, stops = [], [], 0, 0, {"dense": 0, "hybrid": 0, "rerank": 0}
+                mrr, hit1, top1 = [], [], []
+                for r, emb, _ in embedded:
+                    ctx = QueryContext(text=r["text"], embedding=emb)
+                    t = time.perf_counter()
+                    res = await svc.retrieval.search(ctx, kind, strat, 10)
+                    lat.append((time.perf_counter() - t) * 1000)
+                    ranked = [x.source_id for x in res]
+                    m = retrieval_metrics(ranked, corpus.relevant(kind, r["scenario_id"]), KS)
+                    ms_rows.append(m)
+                    mrr.append(m["mrr"]); hit1.append(m["hit@1"]); top1.append(ranked[0] if ranked else "")
+                    rerank_n += int("rerank_ms" in ctx.timings)
+                    lex_n += int("lexical_ms" in ctx.timings)
+                    if strat == "adaptive":
+                        final = [d["stage"] for d in ctx.decisions if d["kind"] == kind and d["action"] == "stop"]
+                        stops[final[-1] if final else "dense"] += 1
+                n = len(embedded)
+                reranked_passages = {"hybrid_reranked": s.rerank_top_n, "adaptive": s.adaptive_rerank_top_n}.get(strat, 0)
+                per_strategy[strat] = {**mean_dicts(ms_rows), "latency": latency_stats(lat), "n": n,
+                                       "cost": {"reranker_passages_per_query": round(rerank_n * reranked_passages / n, 2) if strat == "adaptive" else float(reranked_passages),
+                                                "lexical_leg_rate": round(lex_n / n, 3) if strat in ("hybrid", "hybrid_reranked", "adaptive") else (1.0 if strat in ("lexical", "bm25") else 0.0)}}
+                per_query[strat] = {"mrr": mrr, "hit@1": hit1}
+                tops[strat] = top1
+                if strat == "adaptive":
+                    out["ladder"].setdefault(split, {})[kind] = {"stopped_at_dense": round(stops["dense"] / n, 3), "stopped_at_hybrid": round(stops["hybrid"] / n, 3),
+                                                                 "stopped_at_rerank": round(stops["rerank"] / n, 3)}
+            out["results"].setdefault(split, {})[kind] = per_strategy
+            diffs = {}
+            for other in ("dense", "hybrid", "hybrid_reranked"):
+                diffs[f"adaptive_minus_{other}"] = {m: _paired_bootstrap(per_query["adaptive"][m], per_query[other][m]) for m in ("mrr", "hit@1")}
+            out["paired_differences"].setdefault(split, {})[kind] = diffs
+            rel = lambda r_, sid: sid in corpus.relevant(kind, r_["scenario_id"])  # noqa: E731
+            pairs = list(zip([r for r, _, _ in embedded], tops["adaptive"], tops["dense"]))
+            better = [r["qid"] for r, a, d in pairs if rel(r, a) and not rel(r, d)]
+            worse = [r["qid"] for r, a, d in pairs if rel(r, d) and not rel(r, a)]
+            both_wrong = [r["qid"] for r, a, d in pairs if not rel(r, a) and not rel(r, d)]
+            out["disagreements"].setdefault(split, {})[kind] = {"adaptive_better": len(better), "adaptive_worse": len(worse), "both_wrong": len(both_wrong),
+                                                                "examples_better": better[:4], "examples_worse": worse[:4], "examples_both_wrong": both_wrong[:4]}
+    # ablations on the pooled held-out tickets/articles: what MMR diversity and the reranker rung would do (both are off in the shipped configuration)
+    out["ablations"] = await _adaptive_ablations(svc, corpus, splits)
+    return out
+
+
+async def _adaptive_ablations(svc: Services, corpus: Corpus, splits: dict[str, list[dict]]) -> dict:
+    s = svc.settings
+    rows = [r for name, rs in splits.items() if name in ("gold", "blind") for r in rs]   # held-out only: the variants are judged on queries nothing was tuned on
+    embedded = await _contexts(svc, rows)
+    saved = (s.adaptive_mmr, s.adaptive_rerank_gap, s.adaptive_expand_kinds, s.adaptive_margin_ticket, s.adaptive_margin_article)
+    variants = {"shipped": {}, "with_mmr": {"adaptive_mmr": True}, "with_rerank_rung": {"adaptive_rerank_gap": 0.05}, "expand_both_kinds": {"adaptive_expand_kinds": "ticket,article"},
+                "no_expansion": {"adaptive_expand_kinds": ""}, "always_escalate": {"adaptive_margin_ticket": 9.0, "adaptive_margin_article": 9.0}}
+    out: dict = {}
+    try:
+        for name, over in variants.items():
+            s.adaptive_mmr, s.adaptive_rerank_gap, s.adaptive_expand_kinds, s.adaptive_margin_ticket, s.adaptive_margin_article = saved
+            for k, v in over.items():
+                setattr(s, k, v)
+            entry = {}
+            for kind in ("ticket", "article"):
+                ms, lat = [], []
+                for r, emb, _ in embedded:
+                    ctx = QueryContext(text=r["text"], embedding=emb)
+                    t = time.perf_counter()
+                    res = await svc.retrieval.search(ctx, kind, "adaptive", 10)
+                    lat.append((time.perf_counter() - t) * 1000)
+                    ms.append(retrieval_metrics([x.source_id for x in res], corpus.relevant(kind, r["scenario_id"]), (1, 5, 10)))
+                m = mean_dicts(ms)
+                entry[kind] = {"hit@1": m["hit@1"], "hit@5": m["hit@5"], "mrr": m["mrr"], "ndcg@10": m["ndcg@10"], "mean_ms": round(float(np.mean(lat)), 1)}
+            out[name] = entry
+    finally:
+        s.adaptive_mmr, s.adaptive_rerank_gap, s.adaptive_expand_kinds, s.adaptive_margin_ticket, s.adaptive_margin_article = saved
+    out["n_queries"] = len(embedded)
+    return out

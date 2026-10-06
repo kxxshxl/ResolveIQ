@@ -24,6 +24,8 @@ class LLMResult:
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
     latency_s: float = 0.0
+    temperature: float | None = None
+    seed: int | None = None
 
 
 class LLMProvider(Protocol):
@@ -31,7 +33,7 @@ class LLMProvider(Protocol):
     model: str
 
     async def generate(self, system: str, user: str, *, json_mode: bool = True, max_tokens: int = 700,
-                       temperature: float = 0.1, timeout: float = 45.0) -> LLMResult: ...
+                       temperature: float = 0.1, timeout: float = 45.0, seed: int | None = None) -> LLMResult: ...
 
     async def healthy(self) -> bool: ...
 
@@ -133,15 +135,15 @@ class ResilientLLM:
 
     @tracing.traced(
         "llm.generate",
-        attrs=lambda self, system, user, *, json_mode=True, max_tokens=None, temperature=0.1, priority="normal": {
+        attrs=lambda self, system, user, *, json_mode=True, max_tokens=None, temperature=0.1, priority="normal", seed=None: {
             "gen_ai.operation.name": "chat", "gen_ai.request.temperature": temperature,
             "gen_ai.request.max_tokens": max_tokens or self.s.llm_max_tokens, "resolveiq.llm.json_mode": json_mode,
             "resolveiq.llm.provider_chain": [p.name for p in self.providers], "resolveiq.llm.prompt_chars": len(system) + len(user),
-            "resolveiq.llm.priority": priority},
+            "resolveiq.llm.priority": priority, "gen_ai.request.seed": seed},
         result=lambda r: {"gen_ai.system": r.provider, "gen_ai.response.model": r.model, "gen_ai.usage.input_tokens": r.prompt_tokens,
                           "gen_ai.usage.output_tokens": r.completion_tokens, "resolveiq.llm.response_chars": len(r.text)})
     async def generate(self, system: str, user: str, *, json_mode: bool = True, max_tokens: int | None = None,
-                       temperature: float = 0.1, priority: str = "normal") -> LLMResult:
+                       temperature: float = 0.1, priority: str = "normal", seed: int | None = None) -> LLMResult:
         errors: list[str] = []
         shed = attempted = False
         deadline = time.monotonic() + self.s.llm_total_budget_seconds  # one budget for every attempt of every provider
@@ -170,7 +172,7 @@ class ResilientLLM:
                     try:
                         with tracing.span("llm.call", {"gen_ai.system": p.name, "gen_ai.request.model": p.model, "resolveiq.llm.attempt": attempt}) as sp:
                             res = await p.generate(system, user, json_mode=json_mode, max_tokens=max_tokens or self.s.llm_max_tokens,
-                                                   temperature=temperature, timeout=min(self.s.llm_timeout_seconds, remaining))
+                                                   temperature=temperature, timeout=min(self.s.llm_timeout_seconds, remaining), seed=seed)
                             if sp.is_recording():
                                 sp.set_attributes(tracing._clean({"gen_ai.usage.input_tokens": res.prompt_tokens,
                                                                   "gen_ai.usage.output_tokens": res.completion_tokens}))

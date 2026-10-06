@@ -32,5 +32,10 @@ class LLMUnavailable(ResolveIQError):
     status_code, code = 503, "llm_unavailable"
 
 
+class LLMOverloaded(LLMUnavailable):
+    """Every generation slot was busy (or the circuit was open) so no call was made. Not an outage: it does not trip the breaker."""
+    status_code, code = 503, "llm_overloaded"
+
+
 class RequestTimeout(ResolveIQError):
     status_code, code = 504, "request_timeout"

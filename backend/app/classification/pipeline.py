@@ -9,6 +9,7 @@ from app.classification.strategies import (Classifier, Dist, EmbeddingClassifier
                                            RuleClassifier)
 from app.classification.taxonomy import DIMENSIONS, TaxonomyService
 from app.core.config import Settings
+from app.core.errors import LLMOverloaded
 from app.observability import tracing
 from app.models.schemas import Classification, Confidence
 from app.observability.metrics import CLASSIFICATION_CONFIDENCE
@@ -86,6 +87,8 @@ class ComplaintClassifier:
         try:
             with tracing.span("classify.llm_fallback", {"resolveiq.classify.weak_dimensions": weak}):
                 z = await self.zero_shot.predict(ctx, self.taxonomy.current)
+        except LLMOverloaded:  # the model is busy with answers: keep the rule/kNN labels instead of competing with them
+            return cls
         except Exception as exc:  # noqa: BLE001 - classification must never fail the request
             log.warning("llm classification fallback failed", extra={"error": str(exc)[:200]})
             return cls

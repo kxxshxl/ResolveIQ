@@ -260,6 +260,161 @@ def test_settings_reject_an_llm_budget_that_the_request_timeout_would_cut_off():
     assert Settings().llm_total_budget_seconds < Settings().request_timeout_seconds  # the shipped defaults are consistent
 
 
+# ---------------------------------------------------------------- LLM concurrency limit (bulkhead)
+class _Slow:
+    """A provider that takes `delay` seconds per call and records how many calls ran at the same time."""
+
+    name, model = "slow", "m"
+
+    def __init__(self, delay=0.3, fail=False):
+        self.delay, self.fail, self.calls, self.in_flight, self.max_in_flight = delay, fail, 0, 0, 0
+
+    async def generate(self, system, user, **kw):
+        self.calls += 1
+        self.in_flight += 1
+        self.max_in_flight = max(self.max_in_flight, self.in_flight)
+        try:
+            await asyncio.sleep(self.delay)
+            if self.fail:
+                raise RuntimeError("boom")
+            return LLMResult(text="{}", provider=self.name, model="m")
+        finally:
+            self.in_flight -= 1
+
+    async def healthy(self):
+        return True
+
+
+def _limited(provider, **kw):
+    from app.services.llm.base import ResilientLLM
+
+    base = {"llm_max_retries": 0, "llm_circuit_failure_threshold": 2, "llm_circuit_cooldown_seconds": 60}
+    return ResilientLLM([provider], Settings(**{**base, **kw}))
+
+
+def test_llm_concurrency_limit_is_never_exceeded_and_waiters_are_served():
+    p = _Slow(0.1)
+    llm = _limited(p, llm_max_concurrency=2, llm_queue_wait_seconds=5.0)
+
+    async def go():
+        return await asyncio.gather(*[llm.generate("s", "u") for _ in range(6)])
+
+    assert len(asyncio.run(go())) == 6 and p.max_in_flight == 2 and p.calls == 6
+
+
+def test_llm_overflow_is_shed_without_calling_the_model_or_tripping_the_breaker():
+    from app.core.errors import LLMOverloaded
+
+    p = _Slow(0.3)
+    llm = _limited(p, llm_max_concurrency=1, llm_queue_wait_seconds=0.0)
+
+    async def go():
+        return await asyncio.gather(*[llm.generate("s", "u") for _ in range(3)], return_exceptions=True)
+
+    results = asyncio.run(go())
+    assert sum(isinstance(r, LLMResult) for r in results) == 1
+    assert sum(isinstance(r, LLMOverloaded) for r in results) == 2 and p.calls == 1
+    assert llm.breakers["slow"].failures == 0 and not llm.breakers["slow"].is_open, "being busy is not an outage"
+
+
+def test_llm_normal_priority_waits_for_a_slot_and_low_priority_never_does():
+    import time
+
+    from app.core.errors import LLMOverloaded
+
+    p = _Slow(0.4)
+    llm = _limited(p, llm_max_concurrency=1, llm_queue_wait_seconds=3.0)
+
+    async def go():
+        first = asyncio.create_task(llm.generate("s", "u"))
+        await asyncio.sleep(0.05)
+        t0 = time.monotonic()
+        with pytest.raises(LLMOverloaded):
+            await llm.generate("s", "u", priority="low")  # the model is busy: skipped at once, no queueing
+        low_wait = time.monotonic() - t0
+        second = await llm.generate("s", "u")  # normal priority queues behind the first and then runs
+        return low_wait, await first, second
+
+    low_wait, a, b = asyncio.run(go())
+    assert low_wait < 0.2 and a.provider == b.provider == "slow" and p.max_in_flight == 1 and p.calls == 2
+
+
+def test_llm_slot_is_released_after_a_failure_and_after_a_cancellation():
+    failing = _Slow(0.05, fail=True)
+    llm = _limited(failing, llm_max_concurrency=1, llm_queue_wait_seconds=0.0, llm_circuit_failure_threshold=99)
+
+    async def go():
+        for _ in range(2):  # a failed call must hand its slot back, or the next call would be shed instead of reaching the provider
+            with pytest.raises(LLMUnavailable):
+                await llm.generate("s", "u")
+        slow = _Slow(5.0)
+        llm2 = _limited(slow, llm_max_concurrency=1, llm_queue_wait_seconds=0.0)
+        task = asyncio.create_task(llm2.generate("s", "u"))
+        await asyncio.sleep(0.05)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        slow.delay = 0.01
+        return await llm2.generate("s", "u"), slow
+
+    res, slow = asyncio.run(go())
+    assert failing.calls == 2 and res.provider == "slow" and slow.calls == 2
+
+
+def test_requests_do_not_queue_behind_a_half_open_probe():
+    """Found by the load test: while one probe occupied the only slot of a hung LLM, every other request waited the full queue window
+    for a slot that could not free up, halving throughput. With the breaker half-open and a probe in flight they must degrade at once."""
+    import time
+
+    from app.core.errors import LLMOverloaded  # noqa: F401  (a shed would raise this; the right outcome here is the plain breaker refusal)
+
+    hang = _Hang()
+    llm = _limited(hang, llm_max_concurrency=1, llm_queue_wait_seconds=5.0, llm_total_budget_seconds=3.0, llm_circuit_failure_threshold=1,
+                   llm_circuit_cooldown_seconds=0.0)
+    llm.breakers["hang"].record_failure()  # open; the zero cooldown makes it half-open straight away
+
+    async def go():
+        probe = asyncio.create_task(llm.generate("s", "u"))
+        await asyncio.sleep(0.2)  # the probe now holds both the probe claim and the only slot
+        t0 = time.monotonic()
+        with pytest.raises(LLMUnavailable):
+            await llm.generate("s", "u")
+        waited = time.monotonic() - t0
+        with pytest.raises(LLMUnavailable):
+            await probe
+        return waited
+
+    assert asyncio.run(go()) < 0.5, "must not wait the 5 s queue window"
+    assert len(hang.timeouts) == 1, "only the probe ever reached the model"
+
+
+def test_one_timeout_opens_the_breaker_but_ordinary_errors_need_the_threshold():
+    """With a concurrency limit of 1 failures arrive one per time budget, so a hung model must not need `threshold` of them."""
+    hang = _Hang()
+    llm = _limited(hang, llm_total_budget_seconds=1.5, llm_circuit_failure_threshold=3, llm_circuit_cooldown_seconds=60)
+    with pytest.raises(LLMUnavailable):
+        asyncio.run(llm.generate("s", "u"))
+    assert llm.breakers["hang"].is_open, "one timeout is decisive"
+
+    flaky = _Flaky("flaky", fail_times=99)
+    llm2 = _limited(flaky, llm_circuit_failure_threshold=3, llm_circuit_cooldown_seconds=60)
+    for expected_open in (False, False, True):
+        with pytest.raises(LLMUnavailable):
+            asyncio.run(llm2.generate("s", "u"))
+        assert llm2.breakers["flaky"].is_open is expected_open, "ordinary errors still need three in a row"
+
+
+def test_llm_concurrency_zero_means_unlimited():
+    p = _Slow(0.1)
+    llm = _limited(p, llm_max_concurrency=0)
+
+    async def go():
+        await asyncio.gather(*[llm.generate("s", "u") for _ in range(5)])
+
+    asyncio.run(go())
+    assert p.max_in_flight == 5
+
+
 # ---------------------------------------------------------------- classifier LLM fallback (refine)
 def _refine_setup(llm_text, fail=False):
     from types import SimpleNamespace

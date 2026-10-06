@@ -12,7 +12,7 @@ import uuid
 from app.classification.pipeline import ComplaintClassifier
 from app.classification.taxonomy import TaxonomyService
 from app.core.config import Settings
-from app.core.errors import LLMUnavailable, ResolveIQError
+from app.core.errors import LLMOverloaded, LLMUnavailable, ResolveIQError
 from app.core.logging import trace_id_var
 from app.core.pii import redact
 from app.core.text import looks_like_injection, normalize_text
@@ -204,8 +204,9 @@ class ResolutionService:
 
         if persist:
             await self._persist(resp, red.text)
-        if cache_key and status in ("resolved", "abstained"):
-            await self.cache.set(cache_key, resp.model_dump(mode="json"), ttl=self.s.cache_ttl_seconds)
+        if cache_key and (status in ("resolved", "abstained") or (status == "degraded" and self.s.cache_degraded_ttl_seconds > 0)):
+            ttl = self.s.cache_ttl_seconds if status != "degraded" else min(self.s.cache_ttl_seconds, self.s.cache_degraded_ttl_seconds)
+            await self.cache.set(cache_key, resp.model_dump(mode="json"), ttl=ttl)
         log.info("resolved", extra={"status": status, "intent": cls.intent, "confidence": confidence,
                                     "strategy": strategy, "latency_ms": lat["total"]})
         return resp
@@ -233,6 +234,9 @@ class ResolutionService:
             try:
                 resolution, res = await generate_with_llm(self.llm, complaint, cls, evidence)
                 generator = f"{res.provider}:{res.model}"
+            except LLMOverloaded:
+                warnings.append("LLM is busy with other requests; returned evidence-only resolution.")
+                degraded = True
             except (LLMUnavailable, GenerationError) as exc:
                 warnings.append(f"LLM unavailable or invalid output ({exc.message[:160]}); returned evidence-only resolution.")
                 degraded = True

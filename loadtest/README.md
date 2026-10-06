@@ -29,7 +29,11 @@ python loadtest/summarize.py 2026-10-06        # writes results/2026-10-06/SUMMA
 
 Scenarios (`run_loadtest.py -h`): `llm`, `no_llm` (evidence-only, no LLM provider), `no_llm_no_affect` (ablation without the severity/sentiment
 NLI model), `no_llm_warm` (repeated complaints, response cache can hit), `llm_down` (connection refused), `llm_hang` (the model accepts the
-connection and never answers; `loadtest/stub_llm.py`), `llm_hang_tuned` (same, with `LLM_TIMEOUT_SECONDS=15`).
+connection and never answers; `loadtest/stub_llm.py`), `llm_hang_tuned` (same, with `LLM_TIMEOUT_SECONDS=15`), `mock_llm_warm` (instant mock model, repeated
+complaints), and the repeated-complaint workloads `llm_hot`, `no_llm_hot`, `llm_down_hot` (70% of requests repeat one of 20 popular complaints exactly; the
+cache is warmed first). Any run can override the API's settings with `--env KEY=VALUE` (repeatable; use `--tag` to keep the folders apart), for example
+`--env LLM_MAX_CONCURRENCY=2` or `--env CACHE_TTL_SECONDS=1`. `loadtest/profile_affect.py` profiles the NLI model in isolation. The optimisation
+experiments built on this are in [`docs/performance.md`](../docs/performance.md).
 
 ## What the harness guarantees
 

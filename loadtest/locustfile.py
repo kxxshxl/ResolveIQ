@@ -35,6 +35,8 @@ CACHE_MODE = os.getenv("LT_CACHE_MODE", "cold")
 OOD_SHARE = float(os.getenv("LT_OOD_SHARE", "0.05"))
 CLIENT_TIMEOUT = float(os.getenv("LT_CLIENT_TIMEOUT", "90"))  # longer than the API's own 60 s request timeout, so 504s are observed, not masked
 SEED = int(os.getenv("LT_SEED", "42"))
+HOT_SET = int(os.getenv("LT_HOT_SET", "0"))      # size of a "popular complaints" set (an outage everybody reports the same way)
+HOT_SHARE = float(os.getenv("LT_HOT_SHARE", "0"))  # share of traffic that repeats a complaint from that set exactly; the rest is unique
 OUT = Path(os.getenv("LT_OUT", str(REPO / "loadtest" / "results" / "_adhoc")))
 META = json.loads(os.getenv("LT_META", "{}"))
 STAGES = ("preprocess", "embed", "classify", "retrieve", "generate", "total")
@@ -46,6 +48,7 @@ def _texts(name: str) -> list[str]:
 
 
 IN_DOMAIN = _texts("queries") + _texts("gold_v2") + _texts("gold_blind")
+HOT = random.Random(SEED).sample(IN_DOMAIN, HOT_SET) if HOT_SET else []
 OUT_OF_DOMAIN = _texts("ood")
 _user_ids = itertools.count()
 RECORDS: list[dict] = []
@@ -59,6 +62,8 @@ class SupportAgent(HttpUser):
         self.rng = random.Random(SEED * 1000 + next(_user_ids))
 
     def _complaint(self) -> str:
+        if HOT and self.rng.random() < HOT_SHARE:
+            return self.rng.choice(HOT)  # exact repeat: the only kind of repeat the response/embedding caches can serve
         pool = OUT_OF_DOMAIN if self.rng.random() < OOD_SHARE else IN_DOMAIN
         text = self.rng.choice(pool)
         return f"{text} Case ref {uuid.UUID(int=self.rng.getrandbits(128)).hex[:8]}." if CACHE_MODE == "cold" else text
@@ -119,7 +124,7 @@ def _write(environment, **_):
     stage = {s: _pct([r["server_ms"][s] for r in ok if s in r["server_ms"]]) for s in STAGES}
     summary = {
         "meta": META, "users": environment.parsed_options.num_users if environment.parsed_options else None,
-        "cache_mode": CACHE_MODE, "ood_share": OOD_SHARE, "seed": SEED, "client_timeout_s": CLIENT_TIMEOUT,
+        "cache_mode": CACHE_MODE, "hot_set": HOT_SET, "hot_share": HOT_SHARE, "ood_share": OOD_SHARE, "seed": SEED, "client_timeout_s": CLIENT_TIMEOUT,
         "pool": {"in_domain": len(IN_DOMAIN), "out_of_domain": len(OUT_OF_DOMAIN)},
         "wall_seconds": round(wall, 1),
         "requests": {"completed": n, "ok": len(ok), "failed": n - len(ok), "by_kind": dict(kinds),
@@ -128,6 +133,7 @@ def _write(environment, **_):
         "throughput": {"completed_per_s": round(n / wall, 3), "ok_per_s": round(len(ok) / wall, 3)},
         "outcome": dict(Counter(r["status"] for r in ok)), "generator": dict(Counter(r["generator"] for r in ok)),
         "cache_hits": sum(1 for r in ok if r["cached"]),
+        "llm_generated": sum(1 for r in ok if not r["cached"] and r["generator"] not in ("none", "extractive")),  # answers a model actually produced
         "latency_ms_ok": _pct([r["ms"] for r in ok]),
         "latency_ms_all": _pct([r["ms"] for r in RECORDS]),
         "server_stage_ms_ok": stage,

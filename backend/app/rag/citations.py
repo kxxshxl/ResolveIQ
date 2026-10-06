@@ -83,7 +83,7 @@ async def validate_resolution(resolution: Resolution, evidence: list[RetrievedIt
                 owner.append((i, cid))
     step_vecs = unit_vecs = None
     if cleaned and texts:
-        mat = await asyncio.to_thread(embedder.encode_sync, [s.text for s in cleaned] + texts)
+        mat = await embedder.embed_cached([s.text for s in cleaned] + texts)  # de-duplicated, and evidence sentences are cached across requests
         step_vecs, unit_vecs = mat[: len(cleaned)], mat[len(cleaned):]
 
     unsupported, uncited = [], []

@@ -23,6 +23,9 @@ LLM_LATENCY = Histogram(P + "llm_latency_seconds", "LLM call latency", ["provide
 LLM_FAILURES = Counter(P + "llm_failures_total", "LLM failures", ["provider", "reason"])
 LLM_TOKENS = Counter(P + "llm_tokens_total", "LLM tokens (when the provider reports usage)", ["provider", "type"])
 LLM_CIRCUIT_OPEN = Gauge(P + "llm_circuit_open", "1 when the provider circuit breaker is open", ["provider"])
+LLM_IN_FLIGHT = Gauge(P + "llm_in_flight", "LLM generations currently holding a concurrency slot", ["provider"])
+LLM_SHED = Counter(P + "llm_shed_total", "LLM calls not made because every concurrency slot was busy", ["provider", "priority"])
+LLM_QUEUE_WAIT = Histogram(P + "llm_queue_wait_seconds", "Time spent waiting for an LLM concurrency slot", ["provider"], buckets=_LAT)
 
 CLASSIFICATION_CONFIDENCE = Histogram(
     P + "classification_confidence", "Classifier confidence", ["dimension"], buckets=(0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0)

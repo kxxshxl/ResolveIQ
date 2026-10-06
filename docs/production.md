@@ -16,7 +16,7 @@ Docker Compose here is a local/dev topology, not a production deployment.
 | **Pagination** | `limit` / `offset` on `/search`, `/tickets`, `/articles` (bounded) | Keyset pagination on large listings |
 | **Rate limiting** | Per-API-key (or per-IP) fixed window, shared across replicas through Redis (`429` + `Retry-After`) | Edge rate limiting at the gateway (envoy / API gateway) with token buckets and per-tenant quotas |
 | **Timeouts** | Request timeout (`REQUEST_TIMEOUT_SECONDS` → `504`), LLM timeout, DB statement timeout, nginx `proxy_read_timeout` | Propagate deadlines end-to-end; budget per stage |
-| **Retries / circuit breaking / fallback** | `ResilientLLM`: exponential-backoff retries, per-provider circuit breaker (opens after N failures, half-opens after cooldown), ordered provider chain (Ollama → OpenAI-compatible), final deterministic evidence-only fallback | Hedged requests, per-provider bulkheads, metrics-driven provider routing |
+| **Retries / circuit breaking / fallback** | `ResilientLLM`: exponential-backoff retries, per-provider circuit breaker (opens after N failures or one timeout, half-opens after the cooldown with a single probe), a per-provider concurrency limit with a short queue, and one total time budget per generation, ordered provider chain (Ollama → OpenAI-compatible), final deterministic evidence-only fallback | Hedged requests, per-provider bulkheads, metrics-driven provider routing |
 | **Model / provider abstraction** | `LLMProvider` protocol; `ollama`, `openai_compat` (OpenAI, vLLM, LM Studio, Ollama `/v1`), `mock`; selected by `LLM_PROVIDERS`. No paid API is required anywhere | Serve the LLM with vLLM / TGI on GPU nodes behind the same OpenAI-compatible interface, with autoscaling on queue depth |
 | **Stateless API / horizontal scaling** | No in-process state that matters: documents, vectors, taxonomy, jobs, audit trail in Postgres; cache + rate limits in Redis; models loaded per process. Any number of replicas can run behind a load balancer | Kubernetes `Deployment` + HPA on CPU / p95 latency; readiness gates traffic until models and DB are up; PodDisruptionBudget; `startupProbe` for model load |
 | **DB scaling** | Single Postgres | Managed Postgres with a read replica for retrieval; vertical scale first (pgvector is memory-bound: keep the HNSW index in RAM); shard by tenant / region only when one index no longer fits |
@@ -86,7 +86,8 @@ HTTP-200 responses; errors and timeouts are counted separately. \* = under 100 c
    this second limit was not traced or profiled further).
 4. **Not bottlenecks:** Postgres (retrieval 1.9 ms), Redis, and the API layer: repeated complaints answered from the response cache
    run at 370 req/s with a 19 ms P50 (cache hit ~7 ms). The load generator used at most 0.7 core.
-   Evidence-only answers are deliberately **not** cached (a cached degraded answer would outlive the LLM outage), so an outage pays the full pipeline cost per request.
+   When this baseline was measured, evidence-only answers were deliberately **not** cached, so an outage paid the full pipeline cost per request; they are now cached for 30 s
+   (`CACHE_DEGRADED_TTL_SECONDS`, see [`performance.md`](performance.md)).
 
 **Rough sizing (arithmetic on the measurements, with an assumed workload).** If an agent triggers one resolution every 30-60 s, one local GPU running both
 models serves about 6-13 agents with LLM answers, and the evidence-only path on the order of 500-1000. Production would use a dedicated LLM tier (or hosted model)
@@ -123,8 +124,9 @@ and several API replicas; none of that was measured here.
   can only back a handful of concurrent agents. Instant cited answers beat 60 s failures, but the real remedy is capacity.
 * For several providers set `LLM_TIMEOUT_SECONDS` to at most the budget divided by the number of providers, otherwise a hung first provider uses the whole budget.
 
-**Next steps (not implemented, expected but unmeasured benefit).** Cap concurrent LLM calls per replica (a bulkhead) so overflow degrades at once; micro-batch the NLI model across requests or move it to a
-shared service; add API replicas behind the proxy (the Kubernetes manifests and `docker-compose.prod.yml` already run two); give the LLM its own GPU. Re-run the suite after each change.
+**Follow-up.** These are the *baseline* measurements. The optimisation work they motivated (an LLM concurrency limit, evidence-embedding cache, evidence-only answer cache; and the ideas
+that were measured and rejected, such as NLI batching and removing its lock) is in [`performance.md`](performance.md), with before/after numbers and the recommended production configuration.
+Still open: moving the NLI model to a shared service, API replicas behind the proxy (the Kubernetes manifests and `docker-compose.prod.yml` already run two), and a dedicated GPU for the LLM.
 
 **Caveats.** One laptop, one API process, 25 users at most, closed loop, and runs of 60-120 s; the baseline real-LLM rows have only 25-45 requests each, so their percentiles are coarse. Tracing was off for the headline runs
 and costs about 7-9% of throughput in this pipeline (14.9 vs 16.0 req/s at 1 user, 15.8 vs 17.4 at 10).

@@ -5,6 +5,7 @@ import asyncio
 import hashlib
 import logging
 import time
+from collections import OrderedDict
 from typing import Sequence
 
 import numpy as np
@@ -24,6 +25,7 @@ class EmbeddingService:
         self.model_name = settings.embedding_model
         self._model = None
         self._lock = asyncio.Lock()
+        self._units: OrderedDict[str, np.ndarray] = OrderedDict()  # LRU: evidence text -> embedding (touched only from the event loop)
 
     def _load(self):
         if self._model is None:
@@ -49,6 +51,32 @@ class EmbeddingService:
 
     async def embed_batch(self, texts: Sequence[str]) -> np.ndarray:
         return await asyncio.to_thread(self.encode_sync, texts)
+
+    async def embed_cached(self, texts: Sequence[str]) -> np.ndarray:
+        """Embeddings for many short texts, row-aligned with `texts`. Each distinct text is embedded once per call, and recently seen texts are
+        served from a bounded in-process LRU: citation validation re-embeds the same corpus sentences for every request that cites them."""
+        if not texts:
+            return np.zeros((0, 0), dtype=np.float32)
+        unique = list(dict.fromkeys(texts))
+        size = self.s.embedding_unit_cache_size
+        found: dict[str, np.ndarray] = {}
+        for t in unique:
+            vec = self._units.get(t) if size else None
+            if vec is not None:
+                self._units.move_to_end(t)
+                found[t] = vec
+        missing = [t for t in unique if t not in found]
+        EMBEDDING_CACHE.labels("unit_hit").inc(len(found))
+        EMBEDDING_CACHE.labels("unit_miss").inc(len(missing))
+        tracing.annotate(resolveiq__embed__unique=len(unique), resolveiq__embed__cache_hits=len(found), resolveiq__embed__duplicates=len(texts) - len(unique))
+        if missing:
+            for t, vec in zip(missing, await self.embed_batch(missing)):
+                found[t] = vec
+                if size:
+                    self._units[t] = vec
+            while size and len(self._units) > size:
+                self._units.popitem(last=False)
+        return np.stack([found[t] for t in texts])
 
     @tracing.traced("embed.query", attrs=lambda self, text: {"resolveiq.embed.model": self.model_name})
     async def embed_query(self, text: str) -> np.ndarray:

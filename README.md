@@ -234,7 +234,9 @@ Held-out paraphrase queries, tickets, n=100:
 
 ## 18. Production scaling considerations
 Implemented now vs recommended (pooling, HNSW tuning, batching, queues, caching, rate limiting, timeouts, circuit breaking,
-horizontal scaling, DB scaling, embedding migration, observability, probes) in [`docs/production.md`](docs/production.md).
+horizontal scaling, DB scaling, embedding migration, observability, probes) in [`docs/production.md`](docs/production.md). Measured
+optimisations (LLM concurrency limit, embedding and answer caches, and the NLI ideas that were tried and rejected) with before/after numbers and the
+recommended production configuration are in [`docs/performance.md`](docs/performance.md).
 Implemented: async pooled Postgres, HNSW + GIN, batch embedding, incremental ingestion, **separate worker service on a Postgres
 queue (SKIP LOCKED, heartbeat, retry/backoff, stale-job recovery, scheduled discovery)**, Redis cache + shared rate limit,
 request/LLM/DB timeouts, retries + circuit breaker (single half-open probe) + one total LLM time budget + provider chain + evidence-only fallback, **a reproducible load test (`loadtest/`)**, stateless API, classification

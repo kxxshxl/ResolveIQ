@@ -1,0 +1,1 @@
+150 queries, 1662 step comparisons (fresh and cache-served): grounded-flag changes = 0, validation/status changes = 0, max |grounding score difference| = 0.0000

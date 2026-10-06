@@ -1,0 +1,248 @@
+{
+  "meta": {
+    "scenario": "llm",
+    "description": "full pipeline, local LLM (Ollama) generates the answer",
+    "users": 1,
+    "duration_s": 120,
+    "api_startup_s": 21.4,
+    "overrides": {},
+    "tracing": false
+  },
+  "users": 1,
+  "cache_mode": "cold",
+  "hot_set": 0,
+  "hot_share": 0.0,
+  "ood_share": 0.05,
+  "seed": 42,
+  "client_timeout_s": 90.0,
+  "pool": {
+    "in_domain": 275,
+    "out_of_domain": 12
+  },
+  "wall_seconds": 119.7,
+  "requests": {
+    "completed": 28,
+    "ok": 28,
+    "failed": 0,
+    "by_kind": {
+      "ok": 28
+    },
+    "error_rate": 0.0,
+    "timeout_rate": 0.0
+  },
+  "throughput": {
+    "completed_per_s": 0.234,
+    "ok_per_s": 0.234
+  },
+  "outcome": {
+    "resolved": 23,
+    "abstained": 5
+  },
+  "generator": {
+    "ollama": 23,
+    "none": 5
+  },
+  "cache_hits": 0,
+  "llm_generated": 23,
+  "latency_ms_ok": {
+    "n": 28,
+    "mean": 4210.0,
+    "p50": 4818.6,
+    "p90": 5837.6,
+    "p95": 6398.8,
+    "p99": 7118.2,
+    "max": 7328.7
+  },
+  "latency_ms_all": {
+    "n": 28,
+    "mean": 4210.0,
+    "p50": 4818.6,
+    "p90": 5837.6,
+    "p95": 6398.8,
+    "p99": 7118.2,
+    "max": 7328.7
+  },
+  "server_stage_ms_ok": {
+    "preprocess": {
+      "n": 28,
+      "mean": 0.1,
+      "p50": 0.1,
+      "p90": 0.1,
+      "p95": 0.1,
+      "p99": 0.1,
+      "max": 0.1
+    },
+    "embed": {
+      "n": 28,
+      "mean": 10.2,
+      "p50": 9.7,
+      "p90": 13.5,
+      "p95": 14.7,
+      "p99": 15.2,
+      "max": 15.3
+    },
+    "classify": {
+      "n": 28,
+      "mean": 49.3,
+      "p50": 40.5,
+      "p90": 56.1,
+      "p95": 60.9,
+      "p99": 184.8,
+      "max": 230.5
+    },
+    "retrieve": {
+      "n": 28,
+      "mean": 4.5,
+      "p50": 4.6,
+      "p90": 5.4,
+      "p95": 5.8,
+      "p99": 6.2,
+      "max": 6.3
+    },
+    "generate": {
+      "n": 28,
+      "mean": 4137.1,
+      "p50": 4754.7,
+      "p90": 5772.9,
+      "p95": 6211.6,
+      "p99": 7004.9,
+      "max": 7266.2
+    },
+    "total": {
+      "n": 28,
+      "mean": 4196.8,
+      "p50": 4806.6,
+      "p90": 5820.9,
+      "p95": 6384.9,
+      "p99": 7109.8,
+      "max": 7321.7
+    }
+  },
+  "notes": [
+    "Percentiles are numpy linear-interpolated over the individual requests; P99 is not meaningful below ~100 requests.",
+    "Requests still in flight when the run ends are not counted."
+  ],
+  "server_metrics": {
+    "stage": {
+      "preprocess": {
+        "count": 29,
+        "mean_ms": 0.1
+      },
+      "embed": {
+        "count": 29,
+        "mean_ms": 10.2
+      },
+      "classify": {
+        "count": 29,
+        "mean_ms": 49.0
+      },
+      "retrieve": {
+        "count": 29,
+        "mean_ms": 4.5
+      },
+      "generate": {
+        "count": 28,
+        "mean_ms": 4137.1
+      }
+    },
+    "http_resolve": {
+      "/api/v1/resolve": {
+        "count": 28,
+        "mean_ms": 4208.3
+      }
+    },
+    "affect_model": {
+      "all": {
+        "count": 29,
+        "mean_ms": 46.8
+      }
+    },
+    "embedding": {
+      "single": {
+        "count": 31,
+        "mean_ms": 6.3
+      },
+      "batch": {
+        "count": 21,
+        "mean_ms": 8.9
+      }
+    },
+    "retrieval": {
+      "ticket": {
+        "count": 29,
+        "mean_ms": 2.5
+      },
+      "article": {
+        "count": 29,
+        "mean_ms": 2.0
+      }
+    },
+    "rerank": {},
+    "llm_call": {
+      "ollama": {
+        "count": 23,
+        "mean_ms": 5024.3
+      }
+    },
+    "resolutions": {
+      "generator=ollama,status=resolved": 23,
+      "generator=none,status=abstained": 5
+    },
+    "llm_failures": {},
+    "cache": {
+      "cache=resolve,result=miss": 29
+    },
+    "abstentions": {
+      "reason=weak_evidence": 5
+    },
+    "rate_limited": {},
+    "llm_shed": {
+      "priority=low,provider=ollama": 4
+    },
+    "llm_queue_wait": {
+      "ollama": {
+        "count": 24,
+        "mean_ms": 0.0
+      }
+    },
+    "llm_circuit_open_at_end": {
+      "ollama": 0.0
+    }
+  },
+  "llm": {
+    "calls": 23,
+    "calls_per_s": 0.192,
+    "mean_call_ms": 5024.3,
+    "busy_fraction": 0.965,
+    "answers_per_s": 0.192,
+    "shed": {
+      "priority=low,provider=ollama": 4
+    }
+  },
+  "resources": {
+    "api_cpu_cores": {
+      "mean": 0.02,
+      "max": 0.32
+    },
+    "api_rss_mb": {
+      "mean": 1796.51,
+      "max": 1799
+    },
+    "locust_cpu_cores": {
+      "mean": 0.01,
+      "max": 0.58
+    },
+    "system_cpu_pct": {
+      "mean": 31.74,
+      "max": 38.9
+    },
+    "gpu_util_pct": {
+      "mean": 89.03,
+      "max": 99.0
+    },
+    "gpu_mem_mb": {
+      "mean": 4711.0,
+      "max": 4718.0
+    }
+  }
+}

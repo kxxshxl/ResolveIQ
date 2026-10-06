@@ -1,0 +1,26 @@
+device=cuda dtype=torch.float16 attention=eager cues=14 max_tokens=256
+
+[1] one request = 14 premise/hypothesis pairs, encoded shape (14, 61)
+    tokenize (CPU)             mean/median/max ms: 1.1 / 1.0 / 1.6
+    forward (GPU)              mean/median/max ms: 35.1 / 33.2 / 60.8
+    whole cue_scores([text])   mean/median/max ms: 34.6 / 34.4 / 37.4
+
+[2] batching: texts per forward pass -> ms per text (speed-up vs one text per call)
+    n= 1     34.3 ms/call    34.3 ms/text  x1.00
+    n= 2     67.3 ms/call    33.7 ms/text  x1.02
+    n= 4    137.5 ms/call    34.4 ms/text  x1.00
+    n= 8    268.0 ms/call    33.5 ms/text  x1.02
+    n=16    583.7 ms/call    36.5 ms/text  x0.94
+    n=32   1212.7 ms/call    37.9 ms/text  x0.90
+    batched vs single, 64 texts: max |dp| = 0.00830, label flips 0/128
+
+[3] the lock around the forward pass (calls per second)
+    locked, 1 thread:             30.1 calls/s
+    unlocked, 2 threads:          29.1 calls/s  (x0.97, errors: none)
+    unlocked, 4 threads:          26.2 calls/s  (x0.87, errors: none)
+
+[4] forward-pass options (median ms per request)
+    baseline                     34.8
+    pad_to_multiple_of=8         35.1  x0.99
+    pad_to_multiple_of=16        35.8  x0.97
+    inference_mode               34.2  x1.02

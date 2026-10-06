@@ -25,6 +25,8 @@ class Settings(BaseSettings):
     db_statement_timeout_ms: int = 5000
     redis_url: str = "redis://127.0.0.1:6380/0"
     cache_ttl_seconds: int = 300
+    cache_degraded_ttl_seconds: int = 30  # also cache evidence-only (degraded) answers this long (0 = never; capped at cache_ttl_seconds). Matches the LLM
+                                          # circuit cooldown: a cached degraded answer can outlive an LLM recovery by at most this long
     cache_namespace: str = "riq"   # key prefix: lets several deployments share one Redis safely
 
     # --- API hardening ---
@@ -36,6 +38,7 @@ class Settings(BaseSettings):
     # --- embeddings / reranker ---
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
     embedding_dim: int = 384
+    embedding_unit_cache_size: int = 20000   # in-process LRU of embeddings for evidence text used by citation validation (0 = off); ~30 MB at 20k
     embedding_batch_size: int = 64
     reranker_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
     reranker_enabled: bool = True
@@ -86,6 +89,9 @@ class Settings(BaseSettings):
                                             # otherwise a hung LLM turns every request into a 504 instead of the evidence-only fallback
     llm_max_retries: int = 1
     llm_max_tokens: int = 700
+    llm_max_concurrency: int = 1            # simultaneous generations per provider (0 = unlimited). A local model serves requests one at a time,
+                                            # so more in flight only lengthens every answer; see docs/performance.md
+    llm_queue_wait_seconds: float = 5.0     # how long an answer may wait for a free slot before the request degrades to evidence-only
     llm_circuit_failure_threshold: int = 3
     llm_circuit_cooldown_seconds: float = 30.0
 

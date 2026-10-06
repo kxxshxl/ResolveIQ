@@ -53,6 +53,12 @@ SCENARIOS: dict[str, dict] = {
                          "env": {"LLM_PROVIDERS": "", "AFFECT_ENABLED": "false"}, "warmup": 3},
     "mock_llm_warm": {"desc": "built-in mock LLM (instant, deterministic) with repeated complaints: measures the response-cache path and the API layer without the model",
                       "env": {"LLM_PROVIDERS": "mock"}, "warmup": 3, "cache": "warm"},
+    "llm_hot": {"desc": "real LLM, 70% of requests repeat one of 20 popular complaints exactly (response and embedding caches can serve them)",
+                "env": {}, "warmup": 3, "hot": (20, 0.7)},
+    "no_llm_hot": {"desc": "evidence-only, 70% of requests repeat one of 20 popular complaints exactly", "env": {"LLM_PROVIDERS": ""}, "warmup": 3,
+                   "hot": (20, 0.7)},
+    "llm_down_hot": {"desc": "LLM unreachable, 70% of requests repeat one of 20 popular complaints exactly",
+                     "env": {"OLLAMA_BASE_URL": f"http://127.0.0.1:{DEAD_PORT}"}, "warmup": 2, "hot": (20, 0.7)},
     "no_llm_warm": {"desc": "evidence-only, repeated complaints (response cache can hit)", "env": {"LLM_PROVIDERS": ""}, "warmup": 3, "cache": "warm"},
     "llm_down": {"desc": "LLM unreachable (connection refused), production defaults",
                  "env": {"OLLAMA_BASE_URL": f"http://127.0.0.1:{DEAD_PORT}"}, "warmup": 2},
@@ -134,6 +140,16 @@ def drop_database_and_cache(suite: str) -> None:
         print(f"redis cleanup skipped: {exc}", flush=True)
 
 
+def hot_set(n: int) -> list[str]:
+    """The same popular-complaint set locustfile.py picks (same pool order and seed)."""
+    import random
+
+    pool: list[str] = []
+    for name in ("queries", "gold_v2", "gold_blind"):
+        pool += [json.loads(line)["text"] for line in (REPO / "data" / "eval" / f"{name}.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
+    return random.Random(int(os.getenv("LT_SEED", "42"))).sample(pool, n)
+
+
 def wait_ready(timeout: float = 300) -> None:
     t0 = time.time()
     while time.time() - t0 < timeout:
@@ -196,6 +212,7 @@ def digest_metrics(before: dict, after: dict) -> dict:
         "resolutions": counter("resolveiq_resolutions_total"), "llm_failures": counter("resolveiq_llm_failures_total"),
         "cache": counter("resolveiq_cache_total"), "abstentions": counter("resolveiq_abstentions_total"),
         "rate_limited": counter("resolveiq_rate_limited_total"),
+        "llm_shed": counter("resolveiq_llm_shed_total"), "llm_queue_wait": hist("resolveiq_llm_queue_wait_seconds", "provider", ["ollama"]),
         "llm_circuit_open_at_end": {dict(lab).get("provider", ""): v for (n, lab), v in after.items() if n == "resolveiq_llm_circuit_open"},
     }
 
@@ -268,13 +285,14 @@ class Sampler(threading.Thread):
 
 
 # ------------------------------------------------------------------------------------------------ one run
-def run_one(suite: str, scenario: str, users: int, duration: int, out_root: Path, trace: bool, tag: str) -> dict:
+def run_one(suite: str, scenario: str, users: int, duration: int, out_root: Path, trace: bool, tag: str, extra_env: dict | None = None) -> dict:
     cfg = SCENARIOS[scenario]
     run = f"{scenario}-c{users}{('-' + tag) if tag else ''}"
     out = out_root / scenario / f"c{users}{('-' + tag) if tag else ''}"
     out.mkdir(parents=True, exist_ok=True)
     env = base_env(suite, run)
     env.update(cfg["env"])
+    env.update(extra_env or {})  # --env KEY=VALUE overrides, applied last
     if trace:
         env.update({"OTEL_TRACES_EXPORTER": "otlp", "OTEL_EXPORTER_OTLP_ENDPOINT": "http://127.0.0.1:4318"})
     print(f"\n=== {run}: {cfg['desc']} | {users} users x {duration}s{' | tracing ON' if trace else ''}", flush=True)
@@ -298,13 +316,20 @@ def run_one(suite: str, scenario: str, users: int, duration: int, out_root: Path
                 httpx.post(f"{BASE}/api/v1/resolve", json={"complaint": text + f" warmup {time.time_ns()}"}, timeout=120)
             except httpx.HTTPError:
                 pass
+        if cfg.get("hot"):  # a popular-complaints workload measures the steady state, so answer each popular complaint once first
+            for text in hot_set(cfg["hot"][0]):
+                try:
+                    httpx.post(f"{BASE}/api/v1/resolve", json={"complaint": text}, timeout=120)
+                except httpx.HTTPError:
+                    pass
         before = scrape()
         t_start_us = int(time.time() * 1e6)
 
         sampler = Sampler(api.pid, out)
         meta = {"scenario": scenario, "description": cfg["desc"], "users": users, "duration_s": duration, "api_startup_s": startup_s,
-                "overrides": {k: v for k, v in cfg["env"].items()}, "tracing": trace}
-        lenv = dict(os.environ, LT_OUT=str(out), LT_META=json.dumps(meta), LT_CACHE_MODE=cfg.get("cache", "cold"))
+                "overrides": {**cfg["env"], **(extra_env or {})}, "tracing": trace}
+        lenv = dict(os.environ, LT_OUT=str(out), LT_META=json.dumps(meta), LT_CACHE_MODE=cfg.get("cache", "cold"),
+                    LT_HOT_SET=str(cfg.get("hot", (0, 0))[0]), LT_HOT_SHARE=str(cfg.get("hot", (0, 0))[1]))
         cmd = [sys.executable, "-m", "locust", "-f", str(REPO / "loadtest" / "locustfile.py"), "--headless", "-u", str(users), "-r", str(users),
                "-t", f"{duration}s", "--host", BASE, "--csv", str(out / "locust"), "--stop-timeout", "0", "--loglevel", "WARNING"]
         with (out / "locust.log").open("w", encoding="utf-8") as lf:
@@ -319,6 +344,12 @@ def run_one(suite: str, scenario: str, users: int, duration: int, out_root: Path
 
         summary = json.loads((out / "summary.json").read_text(encoding="utf-8"))
         summary["server_metrics"] = digest_metrics(before, after)
+        llm = (summary["server_metrics"].get("llm_call") or {}).get("ollama") or (summary["server_metrics"].get("llm_call") or {}).get("mock") or {}
+        wall = max(summary["wall_seconds"], 1e-9)
+        summary["llm"] = {"calls": llm.get("count", 0), "calls_per_s": round(llm.get("count", 0) / wall, 3),
+                          "mean_call_ms": llm.get("mean_ms"), "busy_fraction": round(llm.get("count", 0) * (llm.get("mean_ms") or 0) / 1000 / wall, 3),
+                          "answers_per_s": round(summary.get("llm_generated", 0) / wall, 3),  # model-generated answers, cache hits excluded
+                          "shed": summary["server_metrics"].get("llm_shed")}
         summary["resources"] = resources
         for snap_name, snap in (("before", before), ("after", after)):
             with gzip.open(out / f"server_metrics.prom.{snap_name}.json.gz", "wt", encoding="utf-8") as zf:
@@ -409,6 +440,8 @@ def main() -> None:
     ap.add_argument("--trace", action="store_true", help="export OpenTelemetry traces to a Jaeger container and add per-span statistics")
     ap.add_argument("--tag", default="", help="suffix for the run folder (use with --trace so headline runs stay separate)")
     ap.add_argument("--keep-db", action="store_true")
+    ap.add_argument("--env", action="append", default=[], metavar="KEY=VALUE",
+                    help="extra environment for the API process, repeatable, e.g. --env LLM_MAX_CONCURRENCY=2 (use --tag to keep runs apart)")
     args = ap.parse_args()
 
     out_root = REPO / "loadtest" / "results" / args.suite
@@ -428,7 +461,7 @@ def main() -> None:
             time.sleep(6)
         for scenario in args.scenarios:
             for users in args.levels:
-                run_one(args.suite, scenario, users, args.duration, out_root, args.trace, args.tag)
+                run_one(args.suite, scenario, users, args.duration, out_root, args.trace, args.tag, dict(kv.split("=", 1) for kv in args.env))
     finally:
         if jaeger:
             subprocess.run(["docker", "compose", "--profile", "tracing", "rm", "-sf", "jaeger"], cwd=REPO, capture_output=True)

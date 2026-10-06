@@ -79,6 +79,11 @@ async def maintenance(svc: Services, s: Settings) -> None:
         if last is None or (datetime.now(timezone.utc) - last).total_seconds() > s.discovery_schedule_hours * 3600:
             job_id = await svc.repo.create_job("discover_classes", {"scheduled": True})
             log.info("scheduled discovery job enqueued", extra={"job_id": job_id})
+    if s.drift_analysis_hours > 0:
+        last = await svc.repo.last_job_time("drift_analysis")
+        if last is None or (datetime.now(timezone.utc) - last).total_seconds() > s.drift_analysis_hours * 3600:
+            job_id = await svc.repo.create_job("drift_analysis", {"scheduled": True})
+            log.info("scheduled drift analysis enqueued", extra={"job_id": job_id})
 
 
 async def main() -> None:

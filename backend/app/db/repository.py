@@ -454,6 +454,67 @@ class Repository:
         n = int(rows[0]["n"])
         return round(int(rows[0]["bad"]) / n, 4) if n >= 5 else None
 
+    # ------------------------------------------------------------- drift monitoring
+    async def requests_window_detail(self, newer_than_hours: float, older_than_hours: float, limit: int = 20000) -> list[dict]:
+        """Like requests_window, plus the complaint text and id (needed to embed, cluster and link requests to discovery proposals)."""
+        return await self._fetch(
+            """SELECT request_id::text AS request_id, complaint, status, classification->>'intent' AS intent, classification->>'product' AS product,
+                      classification->>'severity' AS severity, classification->>'sentiment' AS sentiment,
+                      (result->'evidence'->>'confidence')::float AS evidence, created_at
+               FROM resolution_requests
+               WHERE created_at <= now() - make_interval(hours => %s) AND created_at > now() - make_interval(hours => %s)
+               ORDER BY created_at DESC LIMIT %s""", (newer_than_hours, older_than_hours, limit))
+
+    async def drift_timeline(self, days: int, bucket: str) -> dict:
+        """Requests per time bucket: volume, abstention, mean evidence and the intent mix. `bucket` is 'hour' or 'day' (validated by the caller)."""
+        if bucket not in ("hour", "day"):
+            raise ValueError("bucket must be 'hour' or 'day'")
+        totals = await self._fetch(
+            """SELECT date_trunc(%s, created_at) AS bucket, count(*) AS n, count(*) FILTER (WHERE status='abstained') AS abstained,
+                      avg((result->'evidence'->>'confidence')::float) AS mean_evidence
+               FROM resolution_requests WHERE created_at > now() - make_interval(days => %s) GROUP BY 1 ORDER BY 1""", (bucket, days))
+        intents = await self._fetch(
+            """SELECT date_trunc(%s, created_at) AS bucket, coalesce(classification->>'intent', 'unknown') AS intent, count(*) AS n
+               FROM resolution_requests WHERE created_at > now() - make_interval(days => %s) GROUP BY 1, 2""", (bucket, days))
+        by_bucket: dict = {}
+        for r in intents:
+            by_bucket.setdefault(r["bucket"], {})[r["intent"]] = int(r["n"])
+        return {"bucket": bucket, "days": days, "points": [
+            {"bucket": r["bucket"], "n": int(r["n"]), "abstention_rate": round(int(r["abstained"]) / int(r["n"]), 4),
+             "mean_evidence": round(r["mean_evidence"], 4) if r["mean_evidence"] is not None else None, "intents": by_bucket.get(r["bucket"], {})}
+            for r in totals]}
+
+    async def save_drift_snapshot(self, snapshot_id: str, window_hours: int, baseline_days: int, report: dict, job_id: str | None) -> None:
+        await self._exec(
+            """INSERT INTO drift_snapshots (snapshot_id,window_hours,baseline_days,status,n_recent,n_baseline,alert_count,emerging_clusters,job_id,report)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+            (snapshot_id, window_hours, baseline_days, report["status"], report["n_recent"], report["n_baseline"], len(report["alerts"]),
+             sum(1 for c in report["emerging_clusters"] if c["significant"]), job_id, Jsonb(json.loads(json.dumps(report, default=str)))))
+
+    async def latest_drift_snapshot(self) -> dict | None:
+        rows = await self._fetch("SELECT snapshot_id::text AS snapshot_id, created_at, window_hours, baseline_days, report "
+                                 "FROM drift_snapshots ORDER BY created_at DESC LIMIT 1")
+        return rows[0] if rows else None
+
+    async def list_drift_snapshots(self, limit: int = 30) -> list[dict]:
+        return await self._fetch(
+            "SELECT snapshot_id::text AS snapshot_id, created_at, window_hours, baseline_days, status, n_recent, n_baseline, alert_count, emerging_clusters "
+            "FROM drift_snapshots ORDER BY created_at DESC LIMIT %s", (limit,))
+
+    async def proposals_overlapping(self, request_ids: list[str]) -> list[dict]:
+        """Taxonomy proposals (any review state except superseded) that contain at least one of these requests, with how many."""
+        if not request_ids:
+            return []
+        return await self._fetch(
+            """SELECT proposal_id::text AS proposal_id, status, recommendation, label_id, size, nearest_intent, created_at,
+                      cardinality(ARRAY(SELECT unnest(member_request_ids) INTERSECT SELECT unnest(%s::uuid[]))) AS overlap
+               FROM taxonomy_proposals WHERE status <> 'superseded' AND member_request_ids && %s::uuid[]
+               ORDER BY overlap DESC, created_at DESC""", (request_ids, request_ids))
+
+    async def active_job_exists(self, kind: str) -> bool:
+        rows = await self._fetch("SELECT 1 FROM jobs WHERE kind=%s AND status IN ('queued','running') LIMIT 1", (kind,))
+        return bool(rows)
+
     async def last_job_time(self, kind: str) -> datetime | None:
         rows = await self._fetch("SELECT max(created_at) AS t FROM jobs WHERE kind=%s", (kind,))
         return rows[0]["t"] if rows else None

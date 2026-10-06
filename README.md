@@ -5,13 +5,15 @@ previously resolved tickets and knowledge-base (KB) articles - and **abstains an
 
 
 ## Screenshots
-The React UI has two sections: resolving a complaint, and reviewing the classes that emerging-class discovery proposes.
+The React UI has three sections: resolving a complaint, reviewing the classes that emerging-class discovery proposes, and drift monitoring.
 
 ![Resolving a complaint: classification, cited steps, evidence, grounding checks and per-stage latency](docs/screenshots/resolve.png)
 
 | Discovery proposals | Reviewing one (extend an existing intent) | After review (audit trail) |
 |---|---|---|
 | ![Pending proposals with cohesion, evidence and examples](docs/screenshots/discovery-proposals.png) | ![Accept form with merge-into option](docs/screenshots/discovery-review.png) | ![Accepted and rejected proposals with outcomes](docs/screenshots/discovery-decided.png) |
+
+![Drift monitoring: current vs baseline distribution, detected drift and an emerging topic (synthetic traffic)](docs/screenshots/drift-monitoring.png)
 
 ## 1. Problem statement
 Support agents search past tickets and KB articles by keyword (`router`, `billing`, `speed`). That fails when the same problem is
@@ -90,6 +92,10 @@ responsible team. If the LLM is down, the answer is `degraded`: steps copied fro
   of complaints from genuinely new classes - the rest get a confident answer from the nearest existing class.
 * **Label-free drift monitoring** - `GET /api/v1/monitoring/drift` + Prometheus gauges/alerts (abstention rate, evidence confidence,
   intent/severity/sentiment mix shift, negative feedback).
+* **Statistical drift detection** ([`docs/drift.md`](docs/drift.md)) - a worker job compares the last day with the previous two weeks using explainable tests (chi-square + per-category tests with PSI, Kolmogorov-Smirnov on evidence,
+  permutation test on the embedding centroid, an exact test for new-topic clusters), each needing a minimum effect size, Holm-corrected to a 1% false-alarm budget per report. Significant new-topic clusters are linked to the discovery proposals
+  that cover them (and, in queue mode, trigger a discovery run); the **Drift monitoring** tab shows current vs baseline, the alerts, the emerging groups and their proposals. Measured on an injection demo
+  (`python -m app.evaluation.drift_demo`, no database): 1.0% false alarms with no change; a 16% to 40% intent surge found 30/30; a 10-complaint new topic found 19/30; 4 to 6 complaints not found (limits in the doc).
 * Demonstrated by `tests/test_ingestion_and_evolution.py` and the `evolving` suite (2 new intents, 12 tickets, 2 articles ingested
   in 0.6 s, Hit@5 0.00 → 0.92). Strategy details: [`docs/production.md`](docs/production.md) §3.
 
@@ -103,7 +109,8 @@ Interactive docs at `/docs`. Auth: `X-API-Key` when `API_KEYS` is set.
 | `POST /api/v1/ingest/ticket` · `/ingest/article` · `/ingest/tickets/batch` (202 + job) · `GET /api/v1/jobs/{id}` | ingestion |
 | `GET/POST /api/v1/taxonomy`, `/taxonomy/labels` | versioned label taxonomy |
 | `POST /api/v1/taxonomy/discover` (202 + job) · `GET /taxonomy/proposals` · `POST /taxonomy/proposals/{id}/accept\|reject` | emerging-class discovery and review |
-| `GET /api/v1/monitoring/drift` | label-free production drift report |
+| `GET /api/v1/monitoring/drift` | label-free production drift report (fast layer) |
+| `GET /api/v1/monitoring/drift/status` · `POST .../drift/run` (202 + job) · `GET .../drift/history` · `GET .../drift/timeline` | statistical drift analysis: latest result, run now, history, traffic over time |
 | `POST /api/v1/articles/{id}/deprecate` | retire stale KB |
 | `POST /api/v1/evaluate` · `GET /api/v1/evaluate/{job}` | run evaluation suites as a background job |
 | `POST /api/v1/feedback` · `GET /api/v1/tickets` · `/articles` · `/stats` | feedback, paginated browsing, overview |
@@ -252,7 +259,7 @@ recommended production configuration are in [`docs/performance.md`](docs/perform
 Implemented: async pooled Postgres, HNSW + GIN, batch embedding, incremental ingestion, **separate worker service on a Postgres
 queue (SKIP LOCKED, heartbeat, retry/backoff, stale-job recovery, scheduled discovery)**, Redis cache + shared rate limit,
 request/LLM/DB timeouts, retries + circuit breaker (single half-open probe) + one total LLM time budget + provider chain + evidence-only fallback, **a reproducible load test (`loadtest/`)**, stateless API, classification
-overlapped with retrieval, Prometheus metrics for both services + 9 validated alert rules + provisioned Grafana dashboard,
+overlapped with retrieval, Prometheus metrics for both services + 12 validated alert rules + provisioned Grafana dashboard,
 **label-free drift monitoring**, **CI quality gate on evaluation metrics**, JSON logs with trace id, **opt-in OpenTelemetry tracing (OTLP)**, liveness/readiness, non-root containers.
 
 ## 19. Security

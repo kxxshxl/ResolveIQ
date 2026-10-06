@@ -183,6 +183,33 @@ async def monitoring_drift(window_hours: int = Query(24, ge=1, le=720), baseline
     return await drift_report(svc.repo, window_hours, baseline_days)
 
 
+class DriftRunBody(BaseModel):
+    window_hours: int | None = Field(None, ge=1, le=720, description="recent window (default DRIFT_WINDOW_HOURS)")
+    baseline_days: int | None = Field(None, ge=1, le=90, description="baseline length immediately before the recent window (default DRIFT_BASELINE_DAYS)")
+
+
+@api.get("/monitoring/drift/status", summary="Latest drift analysis: current vs baseline distributions, detected drift, emerging clusters and their discovery proposals")
+async def drift_status(svc: Services = Depends(get_services)):
+    report = await svc.drift.latest()
+    return report or {"status": "no_analysis", "note": "no analysis has run yet; POST /api/v1/monitoring/drift/run or wait for the worker's schedule"}
+
+
+@api.post("/monitoring/drift/run", status_code=202, summary="Run a drift analysis now (async job; embeds a bounded sample of recent complaints)")
+async def drift_run(body: DriftRunBody, bg: BackgroundTasks, svc: Services = Depends(get_services)):
+    job_id = await jobs.submit(svc, bg, "drift_analysis", body.model_dump(exclude_none=True))
+    return {"job_id": job_id, "status": "queued", "poll": f"/api/v1/jobs/{job_id}"}
+
+
+@api.get("/monitoring/drift/history", summary="Past drift analyses, newest first (status, alert and cluster counts)")
+async def drift_history(limit: int = Query(30, ge=1, le=200), svc: Services = Depends(get_services)):
+    return {"items": await svc.repo.list_drift_snapshots(limit)}
+
+
+@api.get("/monitoring/drift/timeline", summary="Requests per time bucket: volume, abstention, mean evidence and intent mix")
+async def drift_timeline(days: int = Query(14, ge=1, le=90), bucket: Literal["hour", "day"] = "day", svc: Services = Depends(get_services)):
+    return await svc.repo.drift_timeline(days, bucket)
+
+
 # ------------------------------------------------------------------ emerging-class discovery
 class DiscoverBody(BaseModel):
     window_days: int | None = Field(None, ge=1, le=365)

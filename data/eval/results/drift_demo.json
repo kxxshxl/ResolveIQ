@@ -1,0 +1,403 @@
+{
+  "meta": {
+    "embedding_model": "sentence-transformers/all-MiniLM-L6-v2",
+    "numpy": "2.4.6",
+    "scipy": "1.17.1",
+    "python": "3.11.9",
+    "in_domain_complaints": 301,
+    "novel_classes": {
+      "number_porting": 10,
+      "voicemail_issue": 10,
+      "tv_streaming_app": 10,
+      "esim_activation": 6,
+      "international_roaming": 6
+    },
+    "corpus_tickets": 250,
+    "trials_per_scenario": 30,
+    "evidence_proxy": {
+      "abstain_below": 0.4908,
+      "novelty_threshold": 0.6306
+    },
+    "elapsed_s": 20.6
+  },
+  "config": {
+    "min_requests": 30,
+    "alpha": 0.01,
+    "psi_threshold": 0.1,
+    "ks_threshold": 0.15,
+    "abstention_increase": 0.1,
+    "embedding_shift": 0.02,
+    "cluster_enrichment": 2.0,
+    "new_topic_baseline_share": 0.15,
+    "unseen_quantile": 0.05,
+    "min_embedded": 30,
+    "permutations": 500,
+    "novelty_threshold": 0.630598783493042,
+    "cluster_distance_threshold": 0.65,
+    "cluster_min_size": 4
+  },
+  "control": [
+    {
+      "n_baseline": 300,
+      "n_recent": 100,
+      "distinct_complaints": false,
+      "trials": 200,
+      "false_alarms": 2,
+      "false_alarm_rate": 0.01,
+      "ci95": [
+        0.0027,
+        0.0357
+      ],
+      "signals_fired": {
+        "severity_distribution": 1,
+        "emerging_cluster": 1
+      },
+      "design_target": 0.01
+    },
+    {
+      "n_baseline": 140,
+      "n_recent": 70,
+      "distinct_complaints": true,
+      "trials": 200,
+      "false_alarms": 2,
+      "false_alarm_rate": 0.01,
+      "ci95": [
+        0.0027,
+        0.0357
+      ],
+      "signals_fired": {
+        "evidence_confidence": 2
+      },
+      "design_target": 0.01
+    }
+  ],
+  "scenarios": {
+    "intent_shift_25": {
+      "description": "billing_dispute rises from ~16% to 25% of recent traffic",
+      "n_baseline": 300,
+      "n_recent": 100,
+      "trials": 30,
+      "detected": 0,
+      "detection_rate": 0.0,
+      "ci95": [
+        0.0,
+        0.1135
+      ],
+      "signals_fired": {},
+      "correct_attribution": 26
+    },
+    "intent_shift_33": {
+      "description": "billing_dispute rises to 33%",
+      "n_baseline": 300,
+      "n_recent": 100,
+      "trials": 30,
+      "detected": 10,
+      "detection_rate": 0.3333,
+      "ci95": [
+        0.1923,
+        0.5122
+      ],
+      "signals_fired": {
+        "intent_distribution": 10,
+        "product_distribution": 2
+      },
+      "correct_attribution": 30
+    },
+    "intent_shift_40": {
+      "description": "billing_dispute rises to 40%",
+      "n_baseline": 300,
+      "n_recent": 100,
+      "trials": 30,
+      "detected": 30,
+      "detection_rate": 1.0,
+      "ci95": [
+        0.8865,
+        1.0
+      ],
+      "signals_fired": {
+        "intent_distribution": 30,
+        "product_distribution": 6
+      },
+      "correct_attribution": 30
+    },
+    "intent_shift_25_large": {
+      "description": "billing_dispute rises to 25%, with 4x the traffic (1,200 baseline / 400 recent requests)",
+      "n_baseline": 1200,
+      "n_recent": 400,
+      "trials": 30,
+      "detected": 3,
+      "detection_rate": 0.1,
+      "ci95": [
+        0.0346,
+        0.2562
+      ],
+      "signals_fired": {
+        "intent_distribution": 3
+      },
+      "correct_attribution": 30
+    },
+    "severity_shift_40": {
+      "description": "high/critical severity rises from ~30% to 40%",
+      "n_baseline": 300,
+      "n_recent": 100,
+      "trials": 30,
+      "detected": 0,
+      "detection_rate": 0.0,
+      "ci95": [
+        0.0,
+        0.1135
+      ],
+      "signals_fired": {}
+    },
+    "severity_shift_55": {
+      "description": "high/critical severity rises to 55%",
+      "n_baseline": 300,
+      "n_recent": 100,
+      "trials": 30,
+      "detected": 27,
+      "detection_rate": 0.9,
+      "ci95": [
+        0.7438,
+        0.9654
+      ],
+      "signals_fired": {
+        "severity_distribution": 27,
+        "intent_distribution": 2,
+        "sentiment_distribution": 1
+      }
+    },
+    "new_topic_4": {
+      "description": "4 of 100 recent complaints (4%) are about a topic the corpus has never seen",
+      "n_baseline": 300,
+      "n_recent": 100,
+      "trials": 30,
+      "detected": 0,
+      "detection_rate": 0.0,
+      "ci95": [
+        0.0,
+        0.1135
+      ],
+      "signals_fired": {
+        "intent_distribution": 1
+      },
+      "topics_recovered_per_report": 0.0,
+      "unmatched_significant_clusters_per_report": 0.0
+    },
+    "new_topic_6": {
+      "description": "6 of 100 (6%) are a new topic",
+      "n_baseline": 300,
+      "n_recent": 100,
+      "trials": 30,
+      "detected": 0,
+      "detection_rate": 0.0,
+      "ci95": [
+        0.0,
+        0.1135
+      ],
+      "signals_fired": {
+        "intent_distribution": 1,
+        "product_distribution": 1
+      },
+      "topics_recovered_per_report": 0.0,
+      "unmatched_significant_clusters_per_report": 0.0
+    },
+    "new_topic_10": {
+      "description": "10 of 100 (10%) are a new topic",
+      "n_baseline": 300,
+      "n_recent": 100,
+      "trials": 30,
+      "detected": 19,
+      "detection_rate": 0.6333,
+      "ci95": [
+        0.4551,
+        0.7813
+      ],
+      "signals_fired": {
+        "emerging_cluster": 19,
+        "intent_distribution": 1,
+        "evidence_confidence": 1,
+        "product_distribution": 1
+      },
+      "topics_recovered_per_report": 0.633,
+      "unmatched_significant_clusters_per_report": 0.0
+    },
+    "new_topics_3x8": {
+      "description": "three new topics at once, 8 complaints each (24% of recent traffic); detected = at least one recovered",
+      "n_baseline": 300,
+      "n_recent": 100,
+      "trials": 30,
+      "detected": 15,
+      "detection_rate": 0.5,
+      "ci95": [
+        0.3315,
+        0.6685
+      ],
+      "signals_fired": {
+        "emerging_cluster": 15,
+        "evidence_confidence": 2
+      },
+      "topics_recovered_per_report": 0.7,
+      "unmatched_significant_clusters_per_report": 0.0
+    },
+    "vocabulary_shift": {
+      "description": "every recent complaint arrives in chat-widget style (abbreviated, lower case)",
+      "n_baseline": 300,
+      "n_recent": 100,
+      "trials": 30,
+      "detected": 25,
+      "detection_rate": 0.8333,
+      "ci95": [
+        0.6644,
+        0.9266
+      ],
+      "signals_fired": {
+        "evidence_confidence": 19,
+        "emerging_cluster": 18,
+        "abstention_rate": 16,
+        "embedding_centroid": 13
+      }
+    },
+    "stale_knowledge_base": {
+      "description": "tickets for 3 of 9 intents vanish from the evidence corpus",
+      "n_baseline": 300,
+      "n_recent": 100,
+      "trials": 30,
+      "detected": 2,
+      "detection_rate": 0.0667,
+      "ci95": [
+        0.0185,
+        0.2132
+      ],
+      "signals_fired": {
+        "evidence_confidence": 2,
+        "abstention_rate": 1
+      }
+    }
+  },
+  "examples": {
+    "intent_shift_25": {
+      "description": "billing_dispute rises from ~16% to 25% of recent traffic",
+      "trial": null,
+      "status": "not detected in any trial",
+      "alerts": []
+    },
+    "intent_shift_33": {
+      "description": "billing_dispute rises to 33%",
+      "trial": 2,
+      "seed": 1001,
+      "status": "alert",
+      "alerts": [
+        "intent mix shifted (p=6.8e-04, PSI 0.32): billing_dispute 14% to 33%, device_issue 18% to 9%, broadband_disconnection 10% to 3%"
+      ]
+    },
+    "intent_shift_40": {
+      "description": "billing_dispute rises to 40%",
+      "trial": 1,
+      "seed": 1000,
+      "status": "alert",
+      "alerts": [
+        "intent mix shifted (p=3.6e-06, PSI 0.35): billing_dispute 15% to 40%, sim_mobile_connectivity 12% to 5%, plan_change 10% to 5%"
+      ]
+    },
+    "intent_shift_25_large": {
+      "description": "billing_dispute rises to 25%, with 4x the traffic (1,200 baseline / 400 recent requests)",
+      "trial": 3,
+      "seed": 1002,
+      "status": "alert",
+      "alerts": [
+        "intent mix shifted (p=9.0e-05, PSI 0.11): billing_dispute 15% to 25%, broadband_disconnection 10% to 5%, service_outage 9% to 5%"
+      ]
+    },
+    "severity_shift_40": {
+      "description": "high/critical severity rises from ~30% to 40%",
+      "trial": null,
+      "status": "not detected in any trial",
+      "alerts": []
+    },
+    "severity_shift_55": {
+      "description": "high/critical severity rises to 55%",
+      "trial": 2,
+      "seed": 1001,
+      "status": "alert",
+      "alerts": [
+        "severity mix shifted (p=2.8e-07, PSI 0.41): high 18% to 46%, medium 43% to 27%, low 32% to 18%"
+      ]
+    },
+    "new_topic_4": {
+      "description": "4 of 100 recent complaints (4%) are about a topic the corpus has never seen",
+      "trial": null,
+      "status": "not detected in any trial",
+      "alerts": []
+    },
+    "new_topic_6": {
+      "description": "6 of 100 (6%) are a new topic",
+      "trial": null,
+      "status": "not detected in any trial",
+      "alerts": []
+    },
+    "new_topic_10": {
+      "description": "10 of 100 (10%) are a new topic",
+      "trial": 1,
+      "seed": 1000,
+      "status": "alert",
+      "alerts": [
+        "9 recent complaints form a new topic (app, streaming, says, channels): almost nothing like it appears in the baseline; no existing evidence explains it (p=0.001)"
+      ]
+    },
+    "new_topics_3x8": {
+      "description": "three new topics at once, 8 complaints each (24% of recent traffic); detected = at least one recovered",
+      "trial": 2,
+      "seed": 1001,
+      "status": "alert",
+      "alerts": [
+        "evidence confidence fell (KS D=0.29, p=2.4e-04): mean 0.64 to 0.58, 10th percentile 0.54 to 0.48. Retrieval regression, stale knowledge base or vocabulary shift",
+        "8 recent complaints form a new topic (old, number, porting, transferred): almost nothing like it appears in the baseline; no existing evidence explains it (p=0.004)"
+      ],
+      "discovery_link": {
+        "proposals_built": 1,
+        "links": [
+          {
+            "cluster": "c1",
+            "cluster_size": 8,
+            "cluster_keywords": [
+              "old",
+              "number",
+              "porting"
+            ],
+            "proposal_recommendation": "new_class",
+            "proposal_label": "old_number",
+            "proposal_keywords": [
+              "old",
+              "number",
+              "transferred",
+              "ago"
+            ],
+            "shared_complaints": 5,
+            "share_of_cluster": 0.625
+          }
+        ]
+      }
+    },
+    "vocabulary_shift": {
+      "description": "every recent complaint arrives in chat-widget style (abbreviated, lower case)",
+      "trial": 1,
+      "seed": 1000,
+      "status": "alert",
+      "alerts": [
+        "evidence confidence fell (KS D=0.35, p=2.4e-05): mean 0.63 to 0.57, 10th percentile 0.54 to 0.46. Retrieval regression, stale knowledge base or vocabulary shift",
+        "abstention rose from 5% to 22% (p=3.5e-04): requests the corpus cannot answer are becoming common",
+        "complaints moved in embedding space (centroid cosine distance 0.168, permutation p=0.002)"
+      ]
+    },
+    "stale_knowledge_base": {
+      "description": "tickets for 3 of 9 intents vanish from the evidence corpus",
+      "trial": 4,
+      "seed": 1003,
+      "status": "alert",
+      "alerts": [
+        "evidence confidence fell (KS D=0.27, p=0.001): mean 0.63 to 0.60, 10th percentile 0.56 to 0.46. Retrieval regression, stale knowledge base or vocabulary shift",
+        "abstention rose from 2% to 17% (p=6.5e-04): requests the corpus cannot answer are becoming common"
+      ]
+    }
+  }
+}

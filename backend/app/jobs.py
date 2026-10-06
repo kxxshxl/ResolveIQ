@@ -36,12 +36,16 @@ async def _discover(svc: Services, payload: dict, job_id: str) -> dict:
     return await svc.discovery.run(job_id=job_id, window_days=payload.get("window_days"))
 
 
+async def _drift(svc: Services, payload: dict, job_id: str) -> dict:
+    return await svc.drift.run(payload.get("window_hours"), payload.get("baseline_days"), job_id)
+
+
 async def _reindex(svc: Services, payload: dict, job_id: str) -> dict:
     return await svc.ingestion.reindex()
 
 
 TRACE_KEY = "_trace"  # W3C trace context of the enqueuing request, stored in the job payload
-HANDLERS: dict[str, Handler] = {"ingest_batch": _ingest_batch, "evaluate": _evaluate, "discover_classes": _discover, "reindex": _reindex}
+HANDLERS: dict[str, Handler] = {"ingest_batch": _ingest_batch, "evaluate": _evaluate, "discover_classes": _discover, "drift_analysis": _drift, "reindex": _reindex}
 
 
 async def execute(svc: Services, kind: str, payload: dict, job_id: str) -> dict:

@@ -1,4 +1,4 @@
-import type { AcceptBody, AcceptResult, Job, Proposal, ResolveResponse, SearchResponse, Taxonomy } from "./types";
+import type { AcceptBody, AcceptResult, DriftHistoryItem, DriftReport, DriftTimeline, Job, Proposal, ResolveResponse, SearchResponse, Taxonomy } from "./types";
 
 export const getKey = () => localStorage.getItem("riq_api_key") ?? "";
 export const setKey = (k: string) => localStorage.setItem("riq_api_key", k);
@@ -47,3 +47,11 @@ export const acceptProposal = (id: string, body: AcceptBody) =>
 
 export const rejectProposal = (id: string, note?: string) =>
   call<{ proposal_id: string; status: string }>(`/api/v1/taxonomy/proposals/${id}/reject`, { method: "POST", body: JSON.stringify(note ? { note } : {}) });
+
+export const getDriftStatus = () => call<DriftReport>("/api/v1/monitoring/drift/status");
+
+export const runDriftAnalysis = () => call<{ job_id: string }>("/api/v1/monitoring/drift/run", { method: "POST", body: JSON.stringify({}) });
+
+export const getDriftHistory = (limit = 30) => call<{ items: DriftHistoryItem[] }>(`/api/v1/monitoring/drift/history?limit=${limit}`).then((r) => r.items);
+
+export const getDriftTimeline = (days = 14, bucket: "day" | "hour" = "day") => call<DriftTimeline>(`/api/v1/monitoring/drift/timeline?days=${days}&bucket=${bucket}`);

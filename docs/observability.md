@@ -87,6 +87,7 @@ Attribute names below omit their `resolveiq.` prefix (for example `latency_ms.to
 | `POST` (to the LLM) | httpx instrumentation, LLM client only | method, URL, status |
 | `ingest.ticket`, `ingest.article`, `ingest.batch`, `ingest.reindex` | `ingestion/pipeline.py` | `ingest.created/updated/failed`, `batch_size`, `corpus_version`, `embedding_ms` |
 | `worker.job`, `job.<kind>`, `discovery.run` | `worker.py`, `jobs.py`, `discovery/service.py` | `job_id`, `job_kind`, `job_attempt`, discovery counts |
+| `drift.analyze` | `drift/service.py` | `job_id`, `drift.alerts`, `drift.emerging_clusters` |
 
 ## Ids: nothing about the existing ones changed
 

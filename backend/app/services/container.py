@@ -11,6 +11,7 @@ from app.classification.taxonomy import TaxonomyService
 from app.core.config import Settings
 from app.db.repository import Repository
 from app.discovery.service import DiscoveryService
+from app.drift.service import DriftService
 from app.ingestion.pipeline import IngestionService
 from app.rag.pipeline import ResolutionService
 from app.retrieval.reranker import CrossEncoderReranker
@@ -38,6 +39,7 @@ class Services:
     resolution: ResolutionService
     discovery: DiscoveryService
     affect: AffectModel
+    drift: DriftService
     models_ready: bool = False
     _taxonomy_sync: asyncio.Task | None = None
 
@@ -57,7 +59,8 @@ class Services:
         ingestion = IngestionService(repo, embedder, taxonomy, classifier, settings)
         resolution = ResolutionService(repo, retrieval, classifier, taxonomy, llm, embedder, cache, settings)
         discovery = DiscoveryService(repo, retrieval, embedder, taxonomy, settings)
-        svc = cls(settings, repo, cache, embedder, reranker, taxonomy, retrieval, llm, classifier, ingestion, resolution, discovery, affect)
+        drift = DriftService(repo, embedder, settings)
+        svc = cls(settings, repo, cache, embedder, reranker, taxonomy, retrieval, llm, classifier, ingestion, resolution, discovery, affect, drift)
         # load models off the event loop so startup does not block health probes' event loop
         await asyncio.to_thread(embedder.warmup)
         await asyncio.to_thread(reranker.warmup)

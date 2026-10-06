@@ -121,6 +121,25 @@ The job is advisory by design: a model must not silently invent support categori
 Candidates are a deliberately noisy filter (single-request novelty detection reaches only AUC ~0.8); recurrence is what
 turns noise into signal - a real new topic forms a tight cluster, scattered false positives do not.
 
+## 2c. Drift monitoring
+
+```mermaid
+flowchart LR
+    REQ[("resolution_requests")] --> W["recent 24 h / baseline 14 d"]
+    W --> T["category-mix tests (chi-square + per category, PSI)<br/>evidence KS · abstention · centroid permutation"]
+    W --> E["embed a bounded distinct sample"] --> C["cluster both windows together<br/>hypergeometric test per cluster"]
+    T --> H["Holm correction + effect-size gates"]
+    C --> H
+    H --> S[("drift_snapshots")]
+    C --> L["link to taxonomy_proposals<br/>(shared request ids)"]
+    L --> D{"uncovered, no proposal?"}
+    D -- "queue mode" --> J["enqueue discover_classes"]
+    S --> UI["API + Drift monitoring tab"]
+    S --> G["gauges + alerts"]
+```
+
+Runs in the worker (job `drift_analysis`), never in the API. The fast SQL-only layer (`observability/drift.py`) keeps feeding the Prometheus gauges every 5 minutes; this layer adds significance, embeddings and the link to discovery. Details, thresholds and the evaluation: [`drift.md`](drift.md).
+
 ## 3. Module map (`backend/app`)
 
 | Package | Responsibility |
@@ -136,7 +155,8 @@ turns noise into signal - a real new topic forms a tight cluster, scattered fals
 | `ingestion/` | Clean → redact → label → embed → upsert; bulk path; re-index |
 | `services/` | Embedding service, Redis cache, LLM provider abstraction (Ollama / OpenAI-compatible / mock), service container |
 | `evaluation/` | Metrics, datasets, suites (classification, retrieval, robustness, rag, e2e, evolving, discovery), tuning (validation split only), regression `gate.py`, report generator, CLI |
-| `observability/` | Prometheus metric definitions; `drift.py` label-free production drift signals |
+| `observability/` | Prometheus metric definitions; `drift.py` label-free production drift signals (fast layer) |
+| `drift/` | Statistical drift detection: pure tests (`stats.py`), the explainable report and new-topic clusters (`detect.py`), the worker-side service that loads windows, embeds a sample, links proposals and stores snapshots (`service.py`) |
 
 ## 4. Data model
 

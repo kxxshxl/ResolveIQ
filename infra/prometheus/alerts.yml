@@ -33,6 +33,21 @@ groups:
         for: 1h
         labels: {severity: info}
         annotations: {summary: "Intent distribution drifted from the 14-day baseline"}
+      - alert: DriftEmergingTopic
+        expr: max(resolveiq_drift_alert{signal="emerging_cluster"}) == 1
+        for: 1m
+        labels: {severity: warn}
+        annotations: {summary: "A statistically significant group of recent complaints is unlike the baseline. Open the Drift monitoring tab and review the linked discovery proposal (docs/drift.md)"}
+      - alert: DriftDetected
+        expr: max(resolveiq_drift_alert{signal!="emerging_cluster"}) == 1
+        for: 7h
+        labels: {severity: info}
+        annotations: {summary: "The drift analysis has flagged the same distribution, quality or embedding signal in two consecutive runs (docs/drift.md)"}
+      - alert: DriftAnalysisStale
+        expr: time() - max(resolveiq_drift_last_analysis_timestamp_seconds) > 86400
+        for: 1h
+        labels: {severity: warn}
+        annotations: {summary: "No drift analysis finished in 24 h: the worker is down or DRIFT_ANALYSIS_HOURS is 0 (then disable this rule)"}
       - alert: NegativeFeedbackHigh
         expr: resolveiq_recent_negative_feedback_rate > 0.35
         for: 1h

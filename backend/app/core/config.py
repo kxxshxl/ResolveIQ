@@ -106,6 +106,24 @@ class Settings(BaseSettings):
     discovery_extend_agreement: float = 0.60
     discovery_covered_similarity: float = 0.60
 
+    # --- drift monitoring (explainable statistical tests on live traffic; see docs/drift.md) ---
+    drift_window_hours: int = 24                # the "recent" window
+    drift_baseline_days: int = 14               # the baseline: this many days immediately before the recent window
+    drift_alpha: float = 0.01                   # family-wise false-alarm budget per report (Bonferroni across the tests that ran)
+    drift_min_requests: int = 30                # windows smaller than this are reported but never alerted on
+    drift_psi_threshold: float = 0.10           # effect-size gates: a significant but tiny difference is not an alert
+    drift_ks_threshold: float = 0.15
+    drift_abstention_increase: float = 0.10
+    drift_embedding_shift: float = 0.02
+    drift_unseen_quantile: float = 0.05         # descriptive: share of recent complaints farther from the baseline than this quantile of baseline-to-baseline distances
+    drift_cluster_distance: float = 0.65        # average-linkage cosine distance for grouping recent+baseline complaints into candidate new-topic clusters (looser than discovery's 0.55: see docs/drift.md)
+    drift_max_embed_recent: int = 500           # distinct complaints embedded per window (evenly thinned above this)
+    drift_max_embed_baseline: int = 1000
+    drift_permutations: int = 500
+    drift_analysis_hours: float = 6.0           # >0: the worker enqueues an analysis this often (0 = only on demand)
+    drift_trigger_discovery: bool = True        # an unexplained new-topic cluster with no proposal enqueues a discovery run (proposals still need human review)
+    drift_discovery_cooldown_hours: float = 12.0
+
     # --- background jobs / worker service ---
     job_execution: str = "inline"           # inline: API process runs jobs after the response (dev/tests) | queue: a worker service does
     worker_poll_seconds: float = 2.0

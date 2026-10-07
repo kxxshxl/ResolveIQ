@@ -419,7 +419,7 @@ def environment_info() -> dict:
                    "default_retrieval_strategy": s.default_retrieval_strategy, "llm": f"ollama:{s.ollama_model} at {s.ollama_base_url}"},
         "llm_settings": {"timeout_s": s.llm_timeout_seconds, "retries": s.llm_max_retries, "circuit_threshold": s.llm_circuit_failure_threshold,
                          "circuit_cooldown_s": s.llm_circuit_cooldown_seconds, "request_timeout_s": s.request_timeout_seconds},
-        "ollama_ps": sh(["docker", "exec", "nocmind-ollama-1", "ollama", "ps"]) or "n/a",
+        "ollama_ps": sh(["docker", "exec", "resolveiq-ollama-1", "ollama", "ps"]) or "n/a",
     }
     from importlib.metadata import PackageNotFoundError, version  # not `import locust`: that monkey-patches this process with gevent
 

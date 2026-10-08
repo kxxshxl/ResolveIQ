@@ -12,7 +12,52 @@ manifests) is real and was exercised, but it ran on one laptop with a synthetic 
 
 *Screenshots are real output of the console against a scratch database: the resolutions are real, the agent feedback is **simulated** from ground truth (`seed_demo_session.py`) and the drift traffic is **synthetic** (`seed_drift_traffic.py`).*
 
+## Demo
+
+[![A frame from the ResolveIQ demo recording: a cited resolution with its supporting evidence highlighted](docs/demo/resolveiq-demo-poster.png)](docs/demo/resolveiq-demo.mp4)
+
+**[▶ Watch the ResolveIQ demo](docs/demo/resolveiq-demo.mp4)** (MP4, H.264, 1280×720, 2 min 16 s, 7.8 MB, no audio). GitHub does not play a video stored in the repository inline in a README,
+so the image and the link open the file itself; download it if your browser does not play it there.
+
+This is a screen recording of the real console running locally against the scratch demo database (`scripts/demo_env.py`, then `scripts/seed_demo_session.py`), with
+`qwen3:4b-instruct` served by Ollama. In order: a broadband complaint is resolved by the live pipeline (a fresh LLM answer, 5.0 s) → understanding → cited steps, and the
+sources a step highlights → evidence list → confidence → stage trace and provenance → "not helpful" feedback with a reason and a rejected source → evidence graph → case
+replay (model call switched off, so the diff explains the change to an evidence-only answer) → an out-of-domain question that abstains without an LLM call → retrieval
+lab → drift monitoring and discovery → feedback and quality → system health. A Playwright script drove the browser and Playwright's page recorder captured it; the caption
+bar at the bottom was added by that script, and everything else is the running application. As in the screenshots, the feedback shown in Feedback & quality is
+**simulated** from ground truth and the drift traffic (including the smart-home-hub topic) is **synthetic**.
+
+## Rubric Map
+
+Where each assessment criterion is evidenced in this repository. Every link goes to the document section, file or result that supports the claim.
+
+### 1. Problem Background (15 points)
+* **The problem, and why keyword search fails:** [section 1](#1-problem) shows that reworded complaints defeat keyword search. It lists what the system must do (parse intent, product, severity and sentiment; retrieve by meaning; cite; abstain on weak evidence; keep working as data and classes change) and the business case: faster first-contact resolution, consistent answers, safer automation.
+* **Data designed around the problem, with its limits stated:** [`docs/dataset.md`](docs/dataset.md) describes a synthetic, scenario-driven telecom corpus (250 tickets, 26 KB articles, 25 root-cause scenarios), hand-written gold and blind query sets and leakage control. It also explains [why absolute numbers are optimistic](docs/dataset.md#limitations-please-read).
+* **Where the problem is hard:** [the failure-case analysis](docs/evaluation.md#failure-case-analysis) in `docs/evaluation.md` groups the real misses: adjacent root causes with the same symptoms, intent errors that cascade into retrieval, and wrong-source answers that pass validation and that only a person can catch.
+
+### 2. Solution Depth / Production Scale (25 points)
+* **A service, not a notebook:** [service topology](docs/architecture.md#0-service-topology) and [section 8](#8-production-deployment). A stateless API and a worker share Postgres (data, pgvector, taxonomy, audit trail, job queue) and Redis. The API enqueues heavy jobs instead of running them. A TLS production Compose stack runs 2 API replicas ([`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)).
+* **Kubernetes manifests, actually applied:** [`docs/kubernetes.md`](docs/kubernetes.md#1-what-was-tested-and-what-was-not). On a single-node kind cluster, the end-to-end test passed 22 of 22 checks, and 16 of 16 with the LLM down, when re-run on 2026-10-07. A later readiness fix was verified on the container only, not on kind. Running it surfaced [12 findings that were fixed](docs/kubernetes.md#5-findings-from-running-it-on-kubernetes-and-what-was-changed), such as a taxonomy change that never reached the other replicas. This is lab evidence, not proof of production-scale capacity.
+* **Measured scale and failure behaviour:** [`docs/production.md` section 1](docs/production.md#1-scale-and-performance) has a Locust load test of one API process: 0% errors, and requests beyond the single LLM slot are answered from evidence only instead of being queued. [`docs/database.md`](docs/database.md#hnsw-configuration-and-the-100-000-vector-experiment) has a 100,000-vector **synthetic** HNSW experiment (recall@10 0.997). At 250 tickets, Postgres correctly uses an exact scan; HNSW is a scale experiment.
+
+### 3. Design Decisions (20 points)
+* **Decisions with their reasons and failure behaviour:** [`docs/architecture.md` section 5](docs/architecture.md#5-key-design-decisions). The taxonomy is data, so a new class is one API call. Intent and product use rules + kNN + label prototypes; severity and sentiment use an NLI cue model, because topic similarity cannot recover affect. When evidence is insufficient the LLM is not called (`abstained`). Other failures produce `degraded` or `unreliable` answers instead of invented ones.
+* **Defaults chosen by measurement:** [adaptive retrieval: design, tuning, honest result](docs/evaluation.md#adaptive-retrieval-design-tuning-honest-result). Dense retrieval is the default because it won on the recorded splits. Hybrid and cross-encoder reranking can be selected but are not the default, and they are not run on every request. Adaptive retrieval matched dense rather than beating it, so it ships as a bounded, observable option.
+* **Trade-offs measured under load:** [`docs/performance.md` section 2.1](docs/performance.md#21-llm-concurrency-limit-priority-1). One LLM slot with a 5 s queue window was chosen from measured alternatives: 1, 2 and 4 slots all deliver about 0.18 answers/s. Extra concurrent users therefore get evidence-only answers instead of an ever-longer queue.
+
+### 4. Code (25 points)
+* **Clear module boundaries:** the [module map](docs/architecture.md#3-module-map-backendapp) of [`backend/app`](backend/app) covers ingestion, classification, retrieval, RAG (prompt builder and the [citation validator](backend/app/rag/citations.py)), drift, discovery, quality and the API. The [LLM layer](backend/app/services/llm/base.py) has a total time budget, a concurrency limit, a circuit breaker and a provider chain.
+* **Tests that prove behaviour, including hostile input:** [`backend/tests/`](backend/tests) has 21 test modules with 248 top-level test functions (counted in the source; the repository does not record a pass count). [`docs/security.md`](docs/security.md#threats-controls-evidence) maps each threat to its test in [`test_security_hostile.py`](backend/tests/test_security_hostile.py). API access uses an `X-API-Key` with constant-time comparison; there is no per-user identity. [`test_readme_consistency.py`](backend/tests/test_readme_consistency.py) fails if a number in this README disagrees with the result files.
+* **CI and reproducibility:** [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs ruff, then pytest against Postgres + pgvector and Redis. It runs the LLM-free evaluation suites with a regression gate on [`data/eval/thresholds.json`](data/eval/thresholds.json), builds the frontend and images, and validates the Compose and Kubernetes configuration. [`backend/constraints.txt`](backend/constraints.txt) pins package versions to the evaluated ones.
+
+### 5. Evaluation / Monitoring (15 points)
+* **Evaluation on held-out, hand-written sets:** [section 9](#9-evaluation) and [`docs/evaluation.md`](docs/evaluation.md) compare keyword, dense, hybrid, reranked and adaptive retrieval. They also report classification on gold and blind sets, grounding (citation validity 1.00) and end-to-end results: 92% resolved with a source from the right root cause, and all 12 out-of-domain complaints abstained. Every number is generated from `data/eval/results/`, and the corpus is synthetic.
+* **Statistical drift detection with measured limits:** [`docs/drift.md` section 8](docs/drift.md#8-evidence-the-deterministic-injection-demo) uses chi-square, PSI, KS and permutation tests, Holm-corrected to a 1% false-alarm budget. The injection demo measures 1.0% false alarms and the blind spot for new topics of only 4 to 6 complaints.
+* **Runtime monitoring and a feedback loop:** [`docs/observability.md`](docs/observability.md) covers Prometheus metrics, [Grafana dashboards](infra/grafana/dashboards) and [alert rules](infra/prometheus/alerts.yml), plus opt-in OpenTelemetry traces that never carry complaint text. The [Feedback and quality view](docs/console.md#feedback-and-quality) turns agent ratings into an advisory report. In the demo, that feedback is simulated from ground truth.
+
 ## Contents
+[Demo](#demo) · [Rubric Map](#rubric-map) ·
 1 [Problem](#1-problem) · 2 [Semantic understanding](#2-semantic-understanding) · 3 [Hybrid and adaptive retrieval](#3-hybrid-and-adaptive-retrieval) ·
 4 [Evidence graph](#4-evidence-graph) · 5 [Grounded RAG](#5-grounded-rag-and-citation-validation) · 6 [Feedback loop](#6-feedback-loop) ·
 7 [Drift and evolving taxonomy](#7-drift-and-evolving-topics) · 8 [Production deployment](#8-production-deployment) · 9 [Evaluation](#9-evaluation) ·

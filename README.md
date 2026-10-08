@@ -14,10 +14,7 @@ manifests) is real and was exercised, but it ran on one laptop with a synthetic 
 
 ## Demo
 
-[![A frame from the ResolveIQ demo recording: a cited resolution with its supporting evidence highlighted](docs/demo/resolveiq-demo-poster.png)](docs/demo/resolveiq-demo.mp4)
-
-**[▶ Watch the ResolveIQ demo](docs/demo/resolveiq-demo.mp4)** (MP4, H.264, 1280×720, 2 min 16 s, 7.8 MB, no audio). GitHub does not play a video stored in the repository inline in a README,
-so the image and the link open the file itself; download it if your browser does not play it there.
+https://github.com/user-attachments/assets/aace364f-b5ae-4963-8e58-9a0b4cddb6e4
 
 This is a screen recording of the real console running locally against the scratch demo database (`scripts/demo_env.py`, then `scripts/seed_demo_session.py`), with
 `qwen3:4b-instruct` served by Ollama. In order: a broadband complaint is resolved by the live pipeline (a fresh LLM answer, 5.0 s) → understanding → cited steps, and the
